@@ -149,6 +149,23 @@ document.querySelector('#app').innerHTML = `
             </g>
             <g id="moving-ball" visibility="hidden"><circle r="10" fill="#fffbed" stroke="#d6d3ba"/><path d="M-5-8q8 8 0 16M5-8q-8 8 0 16" fill="none" stroke="#b6604f" stroke-width="1.5"/></g>
           </svg>
+          <section class="pitch-chart" id="pitch-chart" aria-label="Pitch locations for this batter">
+            <div class="pitch-chart-heading"><h2>Pitch locations</h2><span id="chart-batter"></span></div>
+            <svg id="pitch-chart-plot" viewBox="390 200 200 180" role="group" aria-label="Front view of the strike zone. Numbers show pitch order.">
+              <g id="chart-batter-icon" role="img" fill="currentColor" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+                <circle cy="-125" r="9" stroke="none"/>
+                <path d="M-9-113H8L12-64H-12Z" stroke="none"/>
+                <path d="M-6-65-11-34-13 0M6-65 9-34 14 0M-5-103-12-85 15-93M7-104 17-91" fill="none" stroke-width="9"/>
+                <path d="M15-93 1-139" fill="none" stroke-width="5"/>
+              </g>
+              <rect id="chart-zone" class="chart-zone"/>
+              <path id="chart-grid" class="chart-grid" fill="none"/>
+              <path class="chart-plate" d="M470 348H510V358L490 369 470 358Z"/>
+              <g id="chart-pitches"></g>
+            </svg>
+            <p id="chart-empty">No pitches yet</p>
+            <ol id="chart-sequence" aria-label="Pitch order, including overlapping locations"></ol>
+          </section>
           <div class="field-instruction" id="field-instruction"><span>RELEASE: arm position</span><span class="instruction-divider"></span><span>BEND: curve · TARGET: aim</span></div>
           <div class="pitch-call" id="pitch-call" aria-live="polite" hidden><small id="call-label">THE CALL</small><strong id="call-title"></strong><span id="call-detail"></span></div>
           <div class="end-screen" id="end-screen" hidden><span class="end-ball">${baseball}</span><small>THREE OUTS. THAT'S THE INNING.</small><h2 id="end-title"></h2><span id="end-save" class="save-badge" hidden></span><p id="end-detail"></p><div id="end-stats"></div><button id="play-again" class="primary-button">Pitch another inning <span>↗</span></button><section class="results-history" aria-label="Full inning pitch history"><h3>Every pitch, every batter</h3><p id="bid-summary"></p><div class="results-table-scroll" tabindex="0" role="region" aria-label="Pitch table, scroll horizontally on small screens"><table id="results-table"><caption>All pitches in inning order. Count is balls-strikes before the pitch.</caption><thead><tr><th scope="col">Pitch</th><th scope="col">Type</th><th scope="col">MPH</th><th scope="col">RPM</th><th scope="col">Count</th><th scope="col">Result</th></tr></thead></table></div></section></div>
@@ -276,6 +293,33 @@ function renderGame() {
   $('#zone-grid').setAttribute('d', `M${zone.x + zone.width / 3} ${zone.y}v${zone.height}m${zone.width / 3} ${-zone.height}v${zone.height}M${zone.x} ${zone.y + zone.height / 3}h${zone.width}m${-zone.width} ${zone.height / 3}h${zone.width}`);
   $('#body-zone-guides').setAttribute('d', batterHand === 'L' ? `M578 ${zone.y}H540M578 ${zone.y + zone.height}H540` : `M402 ${zone.y}H440M402 ${zone.y + zone.height}H440`);
   $('#strike-zone text').setAttribute('y', zone.y - 14);
+  const batterNumber = reviewing ? game.lastResult.batterNumber : game.batters + 1;
+  const pitches = game.history.filter((pitch) => pitch.batterNumber === batterNumber);
+  $('#pitch-chart').hidden = game.over && !reviewing;
+  $('#chart-batter').innerHTML = `BATTER ${String(batterNumber).padStart(2, '0')}<b>${batterHand}HB</b>`;
+  $('#chart-batter').setAttribute('aria-label', `Batter ${batterNumber}, ${batterHand === 'L' ? 'left' : 'right'}-handed batter`);
+  $('#chart-batter').title = `${batterHand === 'L' ? 'Left' : 'Right'}-handed batter`;
+  $('#chart-batter-icon').setAttribute('transform', `translate(${batterHand === 'L' ? 568 : 412} 370) scale(${batterHand === 'L' ? -1 : 1} ${batterHeight / 180})`);
+  $('#chart-batter-icon').setAttribute('aria-label', `${batterHand === 'L' ? 'Left-handed batter to the right' : 'Right-handed batter to the left'} of the strike zone`);
+  for (const [attribute, value] of Object.entries(zone)) $('#chart-zone').setAttribute(attribute, value);
+  $('#chart-grid').setAttribute('d', $('#zone-grid').getAttribute('d'));
+  // Expand the front view for wide misses instead of moving them onto the zone edge.
+  const left = Math.min(390, ...pitches.map((pitch) => pitch.location.x - 16));
+  const right = Math.max(590, ...pitches.map((pitch) => pitch.location.x + 16));
+  const top = Math.min(200, ...pitches.map((pitch) => pitch.location.y - 16));
+  const bottom = Math.max(380, ...pitches.map((pitch) => pitch.location.y + 16));
+  $('#pitch-chart-plot').setAttribute('viewBox', `${left} ${top} ${right - left} ${bottom - top}`);
+  $('#chart-pitches').innerHTML = pitches.map((pitch, index) => {
+    const type = pitchResultType(pitch.outcome, pitch.strikesBefore);
+    const result = trailResults[type];
+    return `<g class="chart-pitch" data-result="${type}" role="img" aria-label="Pitch ${index + 1}: ${result.label}, ${pitch.title}"><title>Pitch ${index + 1}: ${result.label}, ${pitch.title}</title><circle cx="${pitch.location.x}" cy="${pitch.location.y}" r="10" fill="${result.color}"/><text x="${pitch.location.x}" y="${pitch.location.y}">${index + 1}</text></g>`;
+  }).join('');
+  $('#chart-empty').hidden = pitches.length > 0;
+  $('#chart-sequence').hidden = pitches.length === 0;
+  $('#chart-sequence').innerHTML = pitches.map((pitch, index) => {
+    const result = trailResults[pitchResultType(pitch.outcome, pitch.strikesBefore)];
+    return `<li style="--outcome-color:${result.color}" aria-label="Pitch ${index + 1}: ${result.label}, ${pitch.title}" title="Pitch ${index + 1}: ${result.label}, ${pitch.title}">${index + 1}</li>`;
+  }).join('');
   const scenario = SCENARIOS[game.scenario];
   $('#difficulty').value = game.scenario;
   $('#scenario-description').textContent = scenario.description;
@@ -349,7 +393,8 @@ function throwPitch() {
   const ball = $('#moving-ball');
   const path = $('#flight-path');
   const trajectory = path.getAttribute('d');
-  const endpoint = projectPitchPoint(flight.at(-1), 1);
+  const location = { ...flight.at(-1) };
+  const endpoint = projectPitchPoint(location, 1);
   const length = path.getTotalLength();
   const duration = matchMedia('(prefers-reduced-motion: reduce)').matches ? 80 : 1400 * 85 / speed;
   const start = performance.now();
@@ -363,7 +408,7 @@ function throwPitch() {
     const swung = !['ball', 'called-strike'].includes(outcome);
     $('#batter').classList.toggle('swinging', swung);
     const previousBatter = game.batters;
-    game = resolvePitch(game, outcome, { speed, spin, pitchType: currentPreset, pitcherHeight });
+    game = resolvePitch(game, outcome, { speed, spin, pitchType: currentPreset, pitcherHeight, location });
     reviewing = game.batters !== previousBatter;
     {
       const number = $('#at-bat-trails').childElementCount + 1;

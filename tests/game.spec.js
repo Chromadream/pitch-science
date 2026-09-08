@@ -739,6 +739,7 @@ test('trail endpoints distinguish strikes, two-strike fouls, hits, balls and in-
   await pitch(page);
   await expect(page.locator('.pitch-trail').last()).toHaveAttribute('data-result', 'strike');
   await expect(page.locator('.pitch-trail circle').last()).toHaveAttribute('fill', '#FF7F0E');
+  await expect(page.locator('.chart-pitch circle').last()).toHaveAttribute('fill', '#FF7F0E');
   await setRandom(page, [0, 0.99, 0]);
   await pitch(page);
   await expect(page.locator('.pitch-trail').last()).toHaveAttribute('data-result', 'strike');
@@ -746,9 +747,11 @@ test('trail endpoints distinguish strikes, two-strike fouls, hits, balls and in-
   await pitch(page);
   await expect(page.locator('.pitch-trail').last()).toHaveAttribute('data-result', 'two-strike-foul');
   await expect(page.locator('.pitch-trail circle').last()).toHaveAttribute('fill', '#2CA02C');
+  await expect(page.locator('.chart-pitch circle').last()).toHaveAttribute('fill', '#2CA02C');
   await setRandom(page, [0, 0.99, 0.99, 0.99]);
   await pitch(page, 1, false);
   await expect(page.locator('.pitch-trail circle').last()).toHaveAttribute('fill', '#D62728');
+  await expect(page.locator('.chart-pitch circle').last()).toHaveAttribute('fill', '#D62728');
   await expect(page.locator('.pitch-trail').last()).toHaveAttribute('aria-label', /Hit, Home run/);
   await page.locator('#next-batter').click();
   await page.locator('#target-handle').focus();
@@ -756,6 +759,7 @@ test('trail endpoints distinguish strikes, two-strike fouls, hits, balls and in-
   await setRandom(page, []);
   await pitch(page, 4, false);
   await expect(page.locator('.pitch-trail circle').last()).toHaveAttribute('fill', '#1F77B4');
+  await expect(page.locator('.chart-pitch circle').last()).toHaveAttribute('fill', '#1F77B4');
   await expect(page.locator('.pitch-trail').last()).toHaveAttribute('aria-label', /Ball, Walk/);
   await page.locator('#next-batter').click();
   await setRandom(page, [0, 0, 0, 0.99, 0.5]);
@@ -763,12 +767,85 @@ test('trail endpoints distinguish strikes, two-strike fouls, hits, balls and in-
   await expect(page.locator('.pitch-trail').last()).toHaveAttribute('data-result', 'strike');
   await pitch(page, 1, false);
   await expect(page.locator('.pitch-trail circle').last()).toHaveAttribute('fill', '#9467BD');
+  await expect(page.locator('.chart-pitch circle').last()).toHaveAttribute('fill', '#9467BD');
   await expect(page.locator('.pitch-trail').last()).toHaveAttribute('data-result', 'out');
   await expect(page.locator('#pitch-log .log-pitch').first()).toHaveAttribute('data-result', 'out');
   for (const entry of await page.locator('#pitch-log .log-pitch').all()) {
     const type = await entry.getAttribute('data-result');
     const colors = { strike: '#FF7F0E', ball: '#1F77B4', hit: '#D62728', 'two-strike-foul': '#2CA02C', out: '#9467BD' };
     await expect(entry.locator('.log-outcome')).toHaveAttribute('style', `--outcome-color:${colors[type]}`);
+  }
+});
+
+test('pitch chart records true locations, retains review, and resets for each batter', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('#chart-empty')).toBeVisible();
+  await expect(page.locator('#chart-batter b')).toHaveText('RHB');
+  const rightHandedPose = await page.locator('#chart-batter-icon').getAttribute('transform');
+  const icon = await page.locator('#chart-batter-icon').boundingBox();
+  const zone = await page.locator('#chart-zone').boundingBox();
+  expect(icon.x + icon.width).toBeLessThan(zone.x);
+  await setRandom(page, []);
+  await pitch(page, 2);
+  await expect(page.locator('.chart-pitch text')).toHaveText(['1', '2']);
+  await expect(page.locator('#chart-sequence li')).toHaveText(['1', '2']);
+  await expect(page.locator('.chart-pitch circle').first()).toHaveAttribute('cx', '511');
+  await expect(page.locator('.chart-pitch circle').first()).toHaveAttribute('cy', '264');
+  await page.locator('#target-handle').focus();
+  for (let i = 0; i < 10; i++) await page.keyboard.press('Shift+ArrowRight');
+  await pitch(page);
+  await expect(page.locator('.chart-pitch circle').last()).toHaveAttribute('cx', '650');
+  await expect(page.locator('#pitch-chart-plot')).toHaveAttribute('viewBox', '390 200 276 180');
+  await page.locator('#target-handle').focus();
+  for (let i = 0; i < 10; i++) await page.keyboard.press('Shift+ArrowLeft');
+  await setRandom(page, [0.99, 0, 0.5]);
+  await pitch(page, 1, false);
+  await expect(page.locator('#review-title')).toHaveText('Strikeout');
+  await expect(page.locator('.chart-pitch')).toHaveCount(4);
+  await expect(page.locator('#chart-batter')).toHaveText('BATTER 01RHB');
+  await expect(page.locator('#chart-batter')).toHaveAttribute('aria-label', 'Batter 1, right-handed batter');
+  await expect(page.locator('#chart-batter-icon')).toHaveAttribute('transform', rightHandedPose);
+  await expect(page.locator('#chart-zone')).toHaveAttribute('height', '90');
+  await page.locator('#next-batter').click();
+  await expect(page.locator('.chart-pitch')).toHaveCount(0);
+  await expect(page.locator('#chart-batter')).toHaveText('BATTER 02LHB');
+  await expect(page.locator('#chart-batter')).toHaveAttribute('aria-label', 'Batter 2, left-handed batter');
+  await expect(page.locator('#chart-batter-icon')).toHaveAttribute('aria-label', 'Left-handed batter to the right of the strike zone');
+  const leftHandedIcon = await page.locator('#chart-batter-icon').boundingBox();
+  const newZone = await page.locator('#chart-zone').boundingBox();
+  expect(leftHandedIcon.x).toBeGreaterThan(newZone.x + newZone.width);
+  await expect(page.locator('#chart-zone')).toHaveAttribute('height', '82.5');
+  await pitch(page);
+  await expect(page.locator('.chart-pitch text')).toHaveText('1');
+  await page.locator('#restart-button').click();
+  await page.locator('#confirm-restart').click();
+  await expect(page.locator('#chart-empty')).toBeVisible();
+  await expect(page.locator('.chart-pitch')).toHaveCount(0);
+  await expect(page.locator('#chart-batter')).toHaveText('BATTER 01LHB');
+  await setRandom(page, []);
+  await pitch(page, 9);
+  await expect(page.locator('#pitch-chart')).toBeHidden();
+});
+
+test('pitch chart fits the upper-right field in both themes and on phones', async ({ page }) => {
+  await page.goto('/');
+  await setRandom(page, []);
+  await pitch(page);
+  for (const width of [1440, 1024, 768, 390, 320]) {
+    await page.setViewportSize({ width, height: 1000 });
+    for (const theme of ['light', 'dark']) {
+      await page.evaluate((theme) => { document.documentElement.dataset.theme = theme; }, theme);
+      const field = await page.locator('.field-wrap').boundingBox();
+      const chart = await page.locator('#pitch-chart').boundingBox();
+      expect(chart.x).toBeGreaterThan(field.x + field.width / 2);
+      expect(chart.y - field.y).toBeLessThanOrEqual(12);
+      expect(chart.x + chart.width).toBeLessThan(field.x + field.width);
+      expect(chart.y + chart.height).toBeLessThan(field.y + field.height);
+      const target = await page.locator('#target-handle .hit-area').boundingBox();
+      await page.locator('.field-wrap').screenshot({ path: `test-results/pitch-chart-${width}-${theme}.png` });
+      expect(chart.y + chart.height < target.y || chart.x > target.x + target.width).toBe(true);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(width);
+    }
   }
 });
 
