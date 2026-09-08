@@ -66,7 +66,7 @@ test('three strikeouts in exactly nine pitches give a perfect win', () => {
 });
 
 test('each scenario starts with its own score and an empty, fresh inning', () => {
-  for (const [scenario, playerScore, opponentScore] of [['exhibition', 0, 0], ['cgso', 1, 0], ['relief', 4, 3]]) {
+  for (const [scenario, playerScore, opponentScore] of [['exhibition', 0, 0], ['cgso', 1, 0], ['relief', 4, 3], ['relief-easy', 4, 1]]) {
     const game = createGame(scenario);
     assert.equal(game.scenario, scenario);
     assert.equal(game.playerScore, playerScore);
@@ -83,10 +83,10 @@ test('normal and perfect wins award saves only in relief mode', () => {
   for (const scenario of Object.keys(SCENARIOS)) {
     const perfect = strikeOuts(createGame(scenario));
     assert.equal(perfect.win, 'perfect');
-    assert.equal(perfect.save, scenario === 'relief' ? 'save' : null);
+    assert.equal(perfect.save, SCENARIOS[scenario].saveOpportunity ? 'save' : null);
     const normal = strikeOuts(resolvePitch(createGame(scenario), 'single'));
     assert.equal(normal.win, 'normal');
-    assert.equal(normal.save, scenario === 'relief' ? 'save' : null);
+    assert.equal(normal.save, SCENARIOS[scenario].saveOpportunity ? 'save' : null);
     assert.equal(normal.opponentScore, SCENARIOS[scenario].opponentScore);
   }
 });
@@ -127,6 +127,40 @@ test('a bases-loaded walk blows a save and replay starts a new opportunity', () 
   assert.equal(fresh.opponentScore, 3);
   assert.equal(fresh.save, null);
   assert.equal(fresh.pitches, 0);
+});
+
+test('easy relief allows two runs for a Relief Win and blows the save on the tying run', () => {
+  const initial = createGame('relief-easy');
+  assert.equal(initial.playerScore, 4);
+  assert.equal(initial.opponentScore, 1);
+
+  let game = resolvePitch(initial, 'home-run');
+  assert.equal(game.opponentScore, 2);
+  assert.equal(game.save, null);
+  const oneRunSave = strikeOuts(game);
+  assert.equal(oneRunSave.win, 'relief');
+  assert.equal(oneRunSave.save, 'save');
+  game = resolvePitch(game, 'home-run');
+  assert.equal(game.opponentScore, 3);
+  assert.equal(game.save, null);
+
+  const saved = strikeOuts(game);
+  assert.equal(saved.win, 'relief');
+  assert.equal(saved.save, 'save');
+  assert.equal(saved.opponentScore, 3);
+
+  const blown = resolvePitch(game, 'home-run');
+  assert.equal(blown.opponentScore, 4);
+  assert.equal(blown.win, null);
+  assert.equal(blown.save, 'blown-save');
+  assert.equal(blown.over, false);
+  const blownEnd = strikeOuts(blown);
+  assert.equal(blownEnd.win, null);
+  assert.equal(blownEnd.save, 'blown-save');
+
+  const fresh = createGame(saved.scenario);
+  assert.equal(fresh.opponentScore, 1);
+  assert.equal(fresh.save, null);
 });
 
 test('hits with no runs still allow a normal win', () => {
@@ -404,10 +438,15 @@ test('judge bases zone calls on the endpoint and does not mutate its inputs', ()
   assert.equal(judgePitch({ ...pitch, points: [center, { x: 0, y: 0 }] }, rolls(0.99)), 'ball');
 });
 
-test('CGSO is the home starter finishing the top of the ninth with a 1-0 lead', () => {
+test('ninth-inning scenarios have the expected inning and save metadata', () => {
   assert.equal(SCENARIOS.cgso.label, 'CGSO');
   assert.equal(SCENARIOS.cgso.inning, 'Top of the 9th');
   assert.equal(SCENARIOS.relief.inning, 'Bottom of the 9th');
+  assert.equal(SCENARIOS['relief-easy'].inning, 'Bottom of the 9th');
+  assert.equal(SCENARIOS.relief.saveOpportunity, true);
+  assert.equal(SCENARIOS['relief-easy'].saveOpportunity, true);
+  assert.equal(SCENARIOS.relief.reliefWin, undefined);
+  assert.equal(SCENARIOS['relief-easy'].reliefWin, true);
   assert.equal(createGame('cgso').playerScore, 1);
   assert.equal(createGame('cgso').opponentScore, 0);
 });
@@ -744,14 +783,16 @@ test('CGSO batters chase less, attack strikes, miss less, and punish contact', (
   assert.equal(judgePitch(hard, rolls(0.99)), 'called-strike');
 });
 
-test('Relief and Exhibition keep identical batting behavior over seeded pitches', () => {
+test('both Relief scenarios and Exhibition keep identical batting behavior over seeded pitches', () => {
   for (let seed = 1; seed <= 500; seed++) {
     const random = () => {
       let state = seed;
       return () => ((state = (state * 1664525 + 1013904223) >>> 0) / 2 ** 32);
     };
     const pitch = { points: [RELEASE, { x: 430 + seed % 130, y: 230 + seed % 90 }], speed: 35 + seed % 71, spin: -3000 + seed * 12 };
-    assert.equal(judgePitch({ ...pitch, game: createGame('relief') }, random()), judgePitch({ ...pitch, game: createGame('exhibition') }, random()));
+    const exhibition = judgePitch({ ...pitch, game: createGame('exhibition') }, random());
+    assert.equal(judgePitch({ ...pitch, game: createGame('relief') }, random()), exhibition);
+    assert.equal(judgePitch({ ...pitch, game: createGame('relief-easy') }, random()), exhibition);
   }
 });
 

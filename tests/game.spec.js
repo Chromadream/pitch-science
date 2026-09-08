@@ -382,6 +382,47 @@ test('relief tying run is a Blown Save; play continues to three outs on mobile',
   await expect(page.locator('#save-status')).toHaveText('Save opportunity');
 });
 
+test('easy relief allows two runs for a Relief Win and blows the save on the third', async ({ page }) => {
+  await page.goto('/');
+  await page.locator('#difficulty').selectOption('relief-easy');
+  await expect(page.locator('#player-score')).toHaveText('4');
+  await expect(page.locator('#opponent-score')).toHaveText('1');
+  await expect(page.locator('#save-status')).toHaveText('Save opportunity');
+  await expect(page.locator('.objective')).toContainText('allow two runs total');
+
+  const homeRun = [0, 0.99, 0.99, 0.99, 0.375, 0.375];
+  await setRandom(page, homeRun);
+  await pitch(page);
+  await pitch(page, 9);
+  await expect(page.locator('#end-title')).toHaveText('Relief Win.');
+  await expect(page.locator('#end-save')).toHaveText('Save');
+  await expect(page.locator('#end-detail')).toContainText('allowed 1 run, protected the lead, and earned the save');
+
+  await page.locator('#play-again').click();
+  await setRandom(page, [...homeRun, ...homeRun]);
+  await pitch(page, 2);
+  await expect(page.locator('#opponent-score')).toHaveText('3');
+  await expect(page.locator('#save-status')).toHaveText('Save opportunity');
+  await expect(page.locator('.objective')).toContainText('allow two runs total');
+  await pitch(page, 9);
+  await expect(page.locator('#end-title')).toHaveText('Relief Win.');
+  await expect(page.locator('#end-save')).toHaveText('Save');
+  await expect(page.locator('#end-detail')).toContainText('allowed 2 runs, protected the lead, and earned the save');
+
+  await page.locator('#play-again').click();
+  await expect(page.locator('#difficulty')).toHaveValue('relief-easy');
+  await expect(page.locator('#opponent-score')).toHaveText('1');
+  await setRandom(page, [...homeRun, ...homeRun, ...homeRun]);
+  await pitch(page, 3);
+  await expect(page.locator('#opponent-score')).toHaveText('4');
+  await expect(page.locator('#save-status')).toHaveText('Blown Save');
+  await expect(page.locator('#end-screen')).toBeHidden();
+  await pitch(page, 9);
+  await expect(page.locator('#end-title')).toHaveText('Inning complete.');
+  await expect(page.locator('#end-save')).toHaveText('Blown Save');
+  await expect(page.locator('#end-detail')).toContainText('tying run');
+});
+
 test('switching scenarios confirms a reset, cancel and Escape preserve the inning', async ({ page }) => {
   await page.goto('/');
   await setRandom(page, []);

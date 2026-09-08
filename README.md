@@ -109,8 +109,8 @@ Your chosen hand stays selected across restarts, replays, and scenario changes.
 
 ### Scenarios
 
-The difficulty selector offers three scenarios. All start with empty bases and no outs.
-CGSO uses much harder batters. Exhibition and Relief keep the standard batting difficulty.
+The difficulty selector offers four scenarios. All start with empty bases and no outs.
+CGSO uses much harder batters. Exhibition and both Relief scenarios use the standard batting difficulty.
 CGSO batters chase fewer balls, attack more strikes, miss less often, and produce more hits and extra bases on contact.
 Pitch location, movement, and speed changes still affect their chances. Ball/strike rules and win conditions stay the same.
 
@@ -119,14 +119,15 @@ Pitch location, movement, and speed changes still affect their chances. Ball/str
 | Exhibition | Your team 0, opponent 0 | Complete a scoreless inning. |
 | CGSO | Your team 1, opponent 0 | Finish the top of the ninth for a complete-game shutout. |
 | Relief pitching | Your team 4, opponent 3 | Close the bottom of the ninth for a save. |
+| Relief pitching (easy) | Your team 4, opponent 1 | Protect the lead and earn a save. |
 
 The game score includes the starting scores. Runs allowed counts only runs scored during your inning.
 
 CGSO assumes that you already pitched eight scoreless innings for the home team. Only the final inning is playable.
 A scoreless top of the ninth ends the game with your team ahead 1-0. The bottom of the ninth is not needed.
-Relief mode places you on the visiting team, so you pitch the bottom of the ninth with a 4-3 lead.
+Both Relief scenarios place you on the visiting team for the bottom of the ninth. Standard Relief starts with a 4-3 lead. Easy Relief starts with a 4-1 lead, the largest ninth-inning lead that qualifies as a save opportunity without other conditions.
 
-In relief mode, both Normal Win and Perfect Win also earn a **Save**. Allowing the tying run produces a **Blown Save**.
+In either Relief scenario, a scoreless Normal Win or Perfect Win also earns a **Save**. Easy Relief gives you room to allow one or two runs. If you protect the lead, the result is a **Relief Win** and a **Save**. Allowing the tying run produces a **Blown Save**.
 The inning continues until three outs, even after a tying or go-ahead run. A tied final score loses the challenge; there are no extra innings.
 
 Changing scenarios during an inning requires confirmation. Restart and replay keep the selected scenario and restore its starting score.
@@ -143,7 +144,9 @@ Changing scenarios during an inning requires confirmation. Restart and replay ke
 
 **Perfect Win:** record three strikeouts on exactly nine pitches. A foul before the second strike can count toward this total.
 
-An inning with runs allowed ends without a win. There is no manual fielding, stealing, or double-play system.
+**Relief Win:** in Easy Relief, allow one or two runs, record three outs, and keep the lead.
+
+Runs allowed end the win in Exhibition, CGSO, and standard Relief. There is no manual fielding, stealing, or double-play system.
 
 ## Checks
 

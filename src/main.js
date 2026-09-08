@@ -339,6 +339,7 @@ function renderGame() {
     return `<li style="--outcome-color:${result.color}" aria-label="Pitch ${index + 1}: ${result.label}, ${pitch.title}" title="Pitch ${index + 1}: ${result.label}, ${pitch.title}">${index + 1}</li>`;
   }).join('');
   const scenario = SCENARIOS[game.scenario];
+  const saveOpportunity = scenario.saveOpportunity === true;
   $('#difficulty').value = game.scenario;
   $('#scenario-description').textContent = scenario.description;
   $('#inning-name').textContent = scenario.inning;
@@ -346,11 +347,15 @@ function renderGame() {
   $('.inning-label strong').innerHTML = game.scenario === 'exhibition' ? '01 <span>/</span> 01' : '09 <span>/</span> 09';
   $('#player-score').textContent = game.playerScore;
   $('#opponent-score').textContent = game.opponentScore;
-  $('#save-status').hidden = game.scenario !== 'relief';
+  $('#save-status').hidden = !saveOpportunity;
   $('#save-status').textContent = game.save === 'save' ? 'Save' : game.save === 'blown-save' ? 'Blown Save' : 'Save opportunity';
   $('#save-status').classList.toggle('blown-save', game.save === 'blown-save');
-  $('.objective strong').textContent = game.scenario === 'relief' ? "Don't blow the save." : game.scenario === 'cgso' ? 'Finish the shutout.' : 'Keep a clean sheet.';
-  $('.objective p').textContent = game.scenario === 'exhibition' ? "Three outs. Zero runs. That's a win. Nine pitches, three K's? That's perfect." : 'No runs to spare. A tying run loses the challenge. Finish all three outs.';
+  $('.objective strong').textContent = saveOpportunity ? 'Protect the lead.' : game.scenario === 'cgso' ? 'Finish the shutout.' : 'Keep a clean sheet.';
+  $('.objective p').textContent = scenario.reliefWin
+    ? 'You can allow two runs total. The tying run blows the save. Finish all three outs.'
+    : game.scenario === 'exhibition'
+      ? "Three outs. Zero runs. That's a win. Nine pitches, three K's? That's perfect."
+      : 'No runs to spare. A tying run loses the challenge. Finish all three outs.';
   for (const [name, max] of [['balls', 4], ['strikes', 3], ['outs', 3]]) {
     $(`#${name}`).innerHTML = Array.from({ length: max }, (_, i) => `<i class="${i < game[name] ? 'filled' : ''}"></i>`).join('');
     $(`#${name}`).setAttribute('aria-label', `${game[name]} ${name}`);
@@ -452,14 +457,22 @@ function throwPitch() {
 
 function showEnd() {
   hideCall();
-  $('#end-title').textContent = game.win === 'perfect' ? 'Perfect Win.' : game.win === 'normal' ? 'Normal Win.' : 'Inning complete.';
+  const scenario = SCENARIOS[game.scenario];
+  const saveOpportunity = scenario.saveOpportunity === true;
+  $('#end-title').textContent = game.win === 'perfect' ? 'Perfect Win.' : game.win === 'normal' ? 'Normal Win.' : game.win === 'relief' ? 'Relief Win.' : 'Inning complete.';
   $('#end-detail').textContent = game.win === 'perfect' ? 'An immaculate inning. Nine pitches, three strikeouts. You owned every inch of that plate.' : game.win === 'normal' ? 'Three outs and a zero on the board. That is how you shut an inning down.' : `${game.runs} run${game.runs === 1 ? '' : 's'} allowed, but you finished the job. A fresh inning is a chance to leave a zero.`;
-  $('#end-save').hidden = game.scenario !== 'relief';
+  $('#end-save').hidden = !saveOpportunity;
   $('#end-save').textContent = game.save === 'save' ? 'Save' : 'Blown Save';
   $('#end-save').classList.toggle('blown-save', game.save === 'blown-save');
-  if (game.scenario !== 'exhibition') {
-    const score = `Your team ${game.playerScore}, opponent ${game.opponentScore}.`;
-    $('#end-detail').textContent = game.win ? `${score} ${game.win === 'perfect' ? 'An immaculate inning.' : 'Three outs, no runs allowed.'} ${game.scenario === 'relief' ? 'You secured the save.' : 'Complete-game shutout. No bottom of the ninth needed.'}` : `${score} ${game.opponentScore === game.playerScore ? 'The tying run cost you the challenge.' : 'The lead got away.'} You finished all three outs.`;
+  const score = `Your team ${game.playerScore}, opponent ${game.opponentScore}.`;
+  if (saveOpportunity) {
+    $('#end-detail').textContent = game.win === 'relief'
+      ? `${score} You allowed ${game.runs} run${game.runs === 1 ? '' : 's'}, protected the lead, and earned the save.`
+      : game.win
+        ? `${score} ${game.win === 'perfect' ? 'An immaculate inning.' : 'Three outs, no runs allowed.'} You secured the save.`
+        : `${score} ${game.opponentScore === game.playerScore ? 'The tying run cost you the challenge.' : 'The lead got away.'} You finished all three outs.`;
+  } else if (game.scenario === 'cgso') {
+    $('#end-detail').textContent = game.win ? `${score} ${game.win === 'perfect' ? 'An immaculate inning.' : 'Three outs, no runs allowed.'} Complete-game shutout. No bottom of the ninth needed.` : `${score} ${game.opponentScore === game.playerScore ? 'The tying run cost you the challenge.' : 'The lead got away.'} You finished all three outs.`;
   }
   $('#end-stats').innerHTML = `<span><strong>${game.pitches}</strong>PITCHES</span><span><strong>${game.strikeouts}</strong>STRIKEOUTS</span><span><strong>${game.runs}</strong>RUNS</span>`;
   const bidEnded = game.history.find((pitch) => !pitch.immaculateAlive);
@@ -723,7 +736,7 @@ $('#difficulty').addEventListener('change', () => {
 $('#restart-dialog').addEventListener('cancel', () => {
   pendingScenario = null;
 });
-$('#help-dialog .final-rule').insertAdjacentHTML('beforebegin', '<h3>Choose your situation.</h3><p>Exhibition is the original scoreless challenge. CGSO means complete-game shutout: you already pitched eight scoreless innings, and your home team leads 1-0 in the top of the ninth. Three more scoreless outs finish the game without a bottom half. Only this final inning is playable.</p><p>CGSO is hard mode. Batters chase fewer balls, attack more strikes, miss less often, and turn more contact into hits and extra bases. Location, movement, and speed changes still help.</p><p>Relief pitching starts in the bottom of the ninth with your visiting team ahead 4-3 and a save opportunity. Every mode starts with empty bases and no outs. Exhibition and Relief use the standard batting difficulty.</p><p>In relief mode, a Normal Win or Perfect Win also earns a Save. Allowing the tying run is a Blown Save, even if the score stays tied. Finish all three outs in every mode, including after a tying or go-ahead run.</p>');
+$('#help-dialog .final-rule').insertAdjacentHTML('beforebegin', '<h3>Choose your situation.</h3><p>Exhibition is the original scoreless challenge. CGSO means complete-game shutout. You have already pitched eight scoreless innings, and your home team leads 1-0 in the top of the ninth. Three more scoreless outs finish the game without a bottom half. Only the final inning is playable.</p><p>CGSO is hard mode. Batters chase fewer balls, attack more strikes, miss less often, and turn more contact into hits and extra bases. Location, movement, and speed changes still help.</p><p>Standard Relief starts in the bottom of the ninth with your visiting team ahead 4-3. Easy Relief starts with a 4-1 lead. Both are save opportunities, and both use the standard batting difficulty. Every mode starts with empty bases and no outs.</p><p>A scoreless relief inning earns a Normal Win or Perfect Win and a Save. In Easy Relief, you can allow one or two runs and earn a Relief Win and a Save. The tying run causes a Blown Save in either relief mode. Keep pitching until you record three outs.</p>');
 $('#help-dialog ol').insertAdjacentHTML('afterend', '<h3>Height changes the matchup.</h3><p>Set pitcher height from 160 to 210 cm. Your feet stay on the mound, while your body, arm, and release height change together. This changes the flight angle, not the target or pitch speed. Height stays selected when you restart.</p><p>Every new batter, including the first batter, gets a random whole-centimeter height from 165 to 205 cm and an independently random batting side. Both sides are equally likely. There is no repeating lineup; consecutive batters can share either attribute. Both attributes stay fixed during the at-bat and its review. Restarting generates a fresh batter.</p><p>The arcade strike zone runs from the standing batter\'s shoulders to their knees, with a fixed plate width. The drawn zone and umpire use exactly the same boundaries. Your target does not move when a new batter arrives, so check your aim.</p>');
 $('#help-dialog ol').insertAdjacentHTML('afterend', '<h3>Lob it or let it rise.</h3><p>Fastballs range from 60 to 120 MPH, sliders from 60 to 99 MPH, and curveballs from 30 to 90 MPH. Curveballs below 65 MPH gain an eephus-style arc, largest at 30 MPH. Drag BEND up for an even higher loop that drops into the target.</p><p>Every pitch type supports upward ride. Drag BEND down to place the middle of the flight below the target, then watch the ball climb into the zone. This is arcade-style movement. Spin still bends sideways. The release and target stay fixed, and extreme bends stay within the field view.</p>');
 $('#help-dialog ol').insertAdjacentHTML('afterend', '<p>Dashed trails with numbered endpoints show completed pitches in the current at-bat. After a hit, walk, or out, review all pitches and select Next batter to continue. The batter and strike zone stay in place until you advance. After the third out, select View results when you finish reviewing.</p>');

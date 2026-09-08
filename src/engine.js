@@ -18,7 +18,8 @@ export function pitcherPoint(point, height = 180) {
 export const SCENARIOS = Object.freeze({
   exhibition: Object.freeze({ label: 'Exhibition', inning: 'Top of the 1st', playerScore: 0, opponentScore: 0, description: 'The original challenge. Record three outs without allowing a run.' }),
   cgso: Object.freeze({ label: 'CGSO', inning: 'Top of the 9th', playerScore: 1, opponentScore: 0, description: 'Hard mode. Your home team leads 1-0 after eight scoreless innings. These batters chase less, miss less, and hit harder.' }),
-  relief: Object.freeze({ label: 'Relief pitching', inning: 'Bottom of the 9th', playerScore: 4, opponentScore: 3, description: 'Your team leads 4-3. Close the ninth and earn the save. A tying run blows it.' }),
+  relief: Object.freeze({ label: 'Relief pitching', inning: 'Bottom of the 9th', playerScore: 4, opponentScore: 3, saveOpportunity: true, description: 'Your team leads 4-3. Close the ninth and earn the save. A tying run blows it.' }),
+  'relief-easy': Object.freeze({ label: 'Relief pitching (easy)', inning: 'Bottom of the 9th', playerScore: 4, opponentScore: 1, saveOpportunity: true, reliefWin: true, description: 'Your team leads 4-1. Allow up to two runs and you can still earn the save. A tying run blows it.' }),
 });
 
 export const RELEASE = Object.freeze({ x: 450, y: 455 });
@@ -172,10 +173,13 @@ export function resolvePitch(game, outcome, metadata = {}, random = Math.random)
   if (completed && !next.over) {
     Object.assign(next, createBatter(random));
   }
-  next.win = next.over && next.runs === 0
-    ? (next.strikeouts === 3 && next.pitches === 9 ? 'perfect' : 'normal')
+  const scenario = SCENARIOS[next.scenario];
+  next.win = next.over
+    ? next.runs === 0
+      ? (next.strikeouts === 3 && next.pitches === 9 ? 'perfect' : 'normal')
+      : scenario.reliefWin && next.opponentScore < next.playerScore ? 'relief' : null
     : null;
-  if (next.scenario === 'relief') {
+  if (scenario.saveOpportunity) {
     next.save = next.opponentScore >= next.playerScore ? 'blown-save' : next.over ? 'save' : null;
   }
   const immaculateAlive = next.pitches === next.strikeouts * 3 + next.strikes && next.batters === next.strikeouts && next.pitches <= 9;
