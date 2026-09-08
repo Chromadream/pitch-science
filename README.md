@@ -78,14 +78,34 @@ The preview and thrown ball use the same path. Release and target positions do n
 
 The pitcher-height slider ranges from 160 to 210 cm. It scales the body around the planted feet and changes the release height.
 Your chosen arm slot stays relative to the body. A taller pitcher releases higher, changing the flight angle without changing the target or speed.
-Pitcher height stays selected across restarts and scenario changes. Height controls lock during a pitch.
+Set pitcher height before the inning's first pitch. The slider locks after that pitch. Restarting or changing scenarios keeps the selected height. You can change it before the next inning's first pitch.
 
-Batters follow a varied nine-player lineup from 165 to 205 cm. Each new batter has a different height.
-Height stays fixed through balls, strikes, and fouls. It changes after hits, walks, and outs, except the final out.
+Every new batter gets a random whole-centimeter height from 165 to 205 cm, with each height equally likely.
+This includes the first batter of each inning, restart, and replay. There is no fixed or repeating lineup.
+Height stays fixed through balls, strikes, fouls, and at-bat review. The game generates the next batter after hits, walks, and outs, except the final out.
 
 The arcade strike zone extends from the standing batter's shoulders to their knees. Its width stays fixed over the plate.
 The SVG body, zone drawing, target preview, and umpire share the same geometry. This is a game rule, not the MLB strike-zone definition.
 Your target stays fixed when the next batter arrives, so check its position against the new zone.
+
+### Platoon matchups
+
+Choose **Pitcher handedness** below the field. Each new batter has an independently random batting side, with equal chances of right or left.
+Height and handedness do not depend on the batter number or pitcher hand. Consecutive batters can share either attribute.
+The matchup display identifies the batter's side and which player has the advantage.
+Same-handed matchups favor the pitcher; opposite-handed matchups favor the batter in every scenario.
+The game multiplies swing-and-miss probability by 1.15 for same-handed matchups and 0.85 for opposite-handed matchups.
+It also adds or subtracts three percentage points from in-play-out probability on contact, without changing foul probability.
+These are arcade balance settings, not measured MLB splits. Taken ball/strike calls and scoring rules stay unchanged.
+
+Changing hands mirrors the pitcher, release reach, horizontal bend, and spin without moving the target.
+Pitch presets mirror their sideways movement for left-handers. Manual spin and bend controls keep their labeled directions.
+Left-handed batters stand on the opposite side of the plate. Batting side stays fixed during the at-bat and review.
+Pitch history records both hands for each throw, even if you change hands during an at-bat.
+
+You can change pitching hands between pitches, an arcade option rather than an MLB rule.
+The selector locks during flight, at-bat review, and after the inning ends.
+Your chosen hand stays selected across restarts, replays, and scenario changes.
 
 ### Scenarios
 

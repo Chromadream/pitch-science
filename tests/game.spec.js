@@ -1,5 +1,9 @@
 import { test, expect } from '@playwright/test';
 
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => { Math.random = () => 0.375; });
+});
+
 async function setRandom(page, values, fallback = 0.99) {
   await page.evaluate(({ values, fallback }) => {
     let index = 0;
@@ -14,6 +18,31 @@ async function pitch(page, count = 1, advance = true) {
     if (advance && await page.locator('#next-batter').isVisible()) await page.locator('#next-batter').click();
   }
 }
+
+test('first batter and restart sample height then hand from browser RNG', async ({ browser }) => {
+  const context = await browser.newContext();
+  try {
+    await context.addInitScript(() => {
+      const values = [0.999, 0.499];
+      Math.random = () => values.shift() ?? 0.375;
+    });
+    const page = await context.newPage();
+    await page.goto('http://127.0.0.1:5173');
+    await expect(page.locator('#batter-height')).toHaveText('205 cm');
+    await expect(page.locator('#batter-hand')).toHaveText('Right-handed batter');
+    await setRandom(page, [0, 0.5, 0.123]);
+    await page.locator('#pitcher-hand').selectOption('L');
+    await expect(page.locator('#batter-height')).toHaveText('205 cm');
+    await expect(page.locator('#batter-hand')).toHaveText('Right-handed batter');
+    await page.locator('#restart-button').click();
+    await expect(page.locator('#batter-height')).toHaveText('165 cm');
+    await expect(page.locator('#batter-hand')).toHaveText('Left-handed batter');
+    await expect(page.locator('#pitcher-hand')).toHaveValue('L');
+    expect(await page.evaluate(() => Math.random())).toBe(0.123);
+  } finally {
+    await context.close();
+  }
+});
 
 test('nine called strikes earn a Perfect Win, then replay resets', async ({ page }) => {
   const errors = [];
@@ -33,10 +62,12 @@ test('nine called strikes earn a Perfect Win, then replay resets', async ({ page
 
 test('a single can lead to a Normal Win without a run', async ({ page }) => {
   await page.goto('/');
-  await setRandom(page, [0, 0.99, 0.99, 0.1]);
+  await setRandom(page, [0, 0.99, 0.99, 0.1, 0.999, 0.5]);
   await pitch(page);
   await expect(page.locator('#hits')).toHaveText('1');
   await expect(page.locator('#base-1')).toHaveClass('occupied');
+  await expect(page.locator('#batter-height')).toHaveText('205 cm');
+  await expect(page.locator('#batter-hand')).toHaveText('Left-handed batter');
   await pitch(page, 9);
   await expect(page.locator('#end-title')).toHaveText('Normal Win.');
   await expect(page.locator('#runs')).toHaveText('0');
@@ -193,10 +224,12 @@ test('Space throws once and controls lock during the animated flight', async ({ 
   await expect(page.locator('#ready-status')).toHaveText('IN FLIGHT');
   await expect(page.locator('#throw-button')).toBeDisabled();
   await expect(page.locator('#speed')).toBeDisabled();
+  await expect(page.locator('#pitcher-hand')).toBeDisabled();
   await page.keyboard.press('Space');
   await expect(page.locator('#ready-status')).toHaveText('READY');
   await expect(page.locator('#total-pitches')).toHaveText('1 PITCH');
   await expect(page.locator('#speed')).toBeEnabled();
+  await expect(page.locator('#pitcher-hand')).toBeEnabled();
 });
 
 test('small phones keep all controls inside the viewport', async ({ page }) => {
@@ -439,15 +472,21 @@ test('pitcher height scales the body, release, bounds, and flight while keeping 
   await page.locator('#throw-button').click();
   await expect(page.locator('#pitcher-height')).toBeDisabled();
   await expect(page.locator('#ready-status')).toHaveText('READY');
-  await expect(page.locator('#pitcher-height')).toBeEnabled();
+  await expect(page.locator('#pitcher-height')).toBeDisabled();
+  await expect(page.locator('#pitcher-height-status')).toBeVisible();
+  await expect(page.locator('#pitcher-height-status')).toHaveText('Locked for this inning');
+  await expect(page.locator('#pitcher-height')).toHaveCSS('cursor', 'not-allowed');
   await page.locator('#restart-button').click();
   await page.locator('#confirm-restart').click();
+  await expect(page.locator('#pitcher-height')).toBeEnabled();
+  await expect(page.locator('#pitcher-height-status')).toBeHidden();
   await expect(page.locator('#pitcher-height')).toHaveValue('160');
 });
 
 test('batter height and visible zone change between batters, not pitches, and drive calls', async ({ page }) => {
   await page.goto('/');
-  await setRandom(page, []);
+  // Three called strikes, a 165 cm/L batter, four balls, then a 198 cm/R batter.
+  await setRandom(page, [0.99, 0.99, 0.99, 0, 0.5, 0.99, 0.99, 0.99, 0.99, 33 / 41, 0.499]);
   await expect(page.locator('#batter-height')).toHaveText('180 cm');
   await expect(page.locator('#strike-zone rect')).toHaveAttribute('y', '243');
   await expect(page.locator('#strike-zone rect')).toHaveAttribute('height', '90');
@@ -455,6 +494,7 @@ test('batter height and visible zone change between batters, not pitches, and dr
   await expect(page.locator('#batter-height')).toHaveText('180 cm');
   await pitch(page);
   await expect(page.locator('#batter-height')).toHaveText('165 cm');
+  await expect(page.locator('#batter-hand')).toHaveText('Left-handed batter');
   await expect(page.locator('#batter-number')).toHaveText('BATTER 02');
   await expect(page.locator('#target-handle')).toHaveAttribute('transform', 'translate(511 264)');
   const alignment = await page.locator('#batter').evaluate((batter) => {
@@ -467,10 +507,12 @@ test('batter height and visible zone change between batters, not pitches, and dr
   expect(alignment.bottom).toBeCloseTo(alignment.knees);
   await page.locator('#target-handle').focus();
   for (let i = 0; i < 8; i++) await page.keyboard.press('ArrowUp');
+  await expect(page.locator('#target-handle')).toHaveAttribute('transform', 'translate(511 240)');
   await expect(page.locator('#target-description')).toContainText('outside');
   await pitch(page, 4);
   await expect(page.locator('#call-title')).toHaveText('Walk');
   await expect(page.locator('#batter-height')).toHaveText('198 cm');
+  await expect(page.locator('#batter-hand')).toHaveText('Right-handed batter');
   await expect(page.locator('#target-description')).toContainText('inside');
   await pitch(page);
   await expect(page.locator('#call-title')).toHaveText('Called strike');
@@ -590,7 +632,6 @@ test('at-bat trails retain exact flights through adjustments and fouls, then cle
   await expect(page.locator('.pitch-trail path')).toHaveAttribute('d', first);
   await page.locator('[data-preset="curveball"]').click();
   await page.locator('#speed').fill('30');
-  await page.locator('#pitcher-height').fill('210');
   await expect(page.locator('.pitch-trail path')).toHaveAttribute('d', first);
   const second = await page.locator('#flight-path').getAttribute('d');
   await pitch(page);
@@ -630,11 +671,12 @@ test('hits and walks clear the previous at-bat trajectories', async ({ page }) =
 test('completed at-bats pause with every trail and the old zone until Next batter', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/');
-  await setRandom(page, []);
+  await setRandom(page, [0.99, 0.99, 0.99, 0, 0.5]);
   await pitch(page, 3, false);
   await expect(page.locator('#review-title')).toHaveText('Strikeout');
   await expect(page.locator('.pitch-trail')).toHaveCount(3);
   await expect(page.locator('#batter-height')).toHaveText('180 cm');
+  await expect(page.locator('#batter-hand')).toHaveText('Right-handed batter');
   await expect(page.locator('#batter-number')).toHaveText('BATTER 01');
   await expect(page.locator('#strike-zone rect')).toHaveAttribute('height', '90');
   await expect(page.locator('#throw-button')).toBeDisabled();
@@ -643,31 +685,51 @@ test('completed at-bats pause with every trail and the old zone until Next batte
   await page.locator('body').click({ position: { x: 5, y: 5 } });
   await page.keyboard.press('Space');
   await expect(page.locator('#total-pitches')).toHaveText('3 PITCHES');
+  // The next batter was already sampled at resolution, not on leaving review.
+  await setRandom(page, [0.99, 0.99, 0.99, 33 / 41, 0.499]);
   await page.locator('#next-batter').click();
   await expect(page.locator('.pitch-trail')).toHaveCount(0);
   await expect(page.locator('#batter-height')).toHaveText('165 cm');
+  await expect(page.locator('#batter-hand')).toHaveText('Left-handed batter');
   await expect(page.locator('#throw-button')).toBeEnabled();
-  await pitch(page, 3);
+  await pitch(page, 3, false);
+  await expect(page.locator('#batter-height')).toHaveText('165 cm');
+  await expect(page.locator('#batter-hand')).toHaveText('Left-handed batter');
+  await page.locator('#next-batter').click();
+  await expect(page.locator('#batter-height')).toHaveText('198 cm');
+  await expect(page.locator('#batter-hand')).toHaveText('Right-handed batter');
+  await setRandom(page, [0.99, 0.99, 0.99, 0.123, 0.456]);
   await pitch(page, 3, false);
   await expect(page.locator('#next-batter')).toContainText('View results');
   await expect(page.locator('#end-screen')).toBeHidden();
   await expect(page.locator('.pitch-trail')).toHaveCount(3);
+  await expect(page.locator('#batter-height')).toHaveText('198 cm');
+  await expect(page.locator('#batter-hand')).toHaveText('Right-handed batter');
   await page.locator('#next-batter').click();
   await expect(page.locator('#end-title')).toHaveText('Perfect Win.');
+  expect(await page.evaluate(() => [Math.random(), Math.random()])).toEqual([0.123, 0.456]);
+  const groups = page.locator('#results-table .batter-group');
+  await expect(groups.nth(0)).toContainText('180 cm / RHB');
+  await expect(groups.nth(1)).toContainText('165 cm / LHB');
+  await expect(groups.nth(2)).toContainText('198 cm / RHB');
 });
 
 test('a hit pauses for review and restarting during review restores pitching', async ({ page }) => {
   await page.goto('/');
-  await setRandom(page, [0, 0.99, 0.99, 0.1]);
+  await setRandom(page, [0, 0.99, 0.99, 0.1, 0, 0.5]);
   await pitch(page, 1, false);
   await expect(page.locator('#review-title')).toHaveText('Single');
   await expect(page.locator('.pitch-trail')).toHaveCount(1);
   await expect(page.locator('#batter-height')).toHaveText('180 cm');
+  await expect(page.locator('#batter-hand')).toHaveText('Right-handed batter');
+  await setRandom(page, [33 / 41, 0.499]);
   await page.locator('#restart-button').click();
   await page.locator('#confirm-restart').click();
   await expect(page.locator('#at-bat-review')).toBeHidden();
   await expect(page.locator('.pitch-trail')).toHaveCount(0);
   await expect(page.locator('#throw-button')).toBeEnabled();
+  await expect(page.locator('#batter-height')).toHaveText('198 cm');
+  await expect(page.locator('#batter-hand')).toHaveText('Right-handed batter');
 });
 
 test('trail endpoints distinguish strikes, two-strike fouls, hits, balls and in-play outs', async ({ page }) => {
@@ -772,4 +834,99 @@ test('desktop inning progress sits left of the field and pitch controls sit righ
   await expect(page.locator('.inning-strip #total-pitches')).toHaveText('2 PITCHES');
   await expect(page.locator('.inning-strip .log-pitch')).toHaveCount(2);
   await expect(page.locator('.inning-strip #perfect-dots .filled')).toHaveCount(2);
+});
+
+test('handedness mirrors release geometry and presets, survives resets, and fits small phones', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 740 });
+  await page.goto('/');
+  const selector = page.getByLabel('Pitcher handedness');
+  const original = await page.locator('#flight-path').getAttribute('d');
+  const target = await page.locator('#target-handle').getAttribute('transform');
+  await selector.selectOption('L');
+  await expect(page.locator('#platoon-matchup')).toHaveText('LHP vs RHB: Batter advantage');
+  await expect(page.locator('#pitcher')).toHaveAttribute('aria-label', /^Left-handed/);
+  await expect(page.locator('#release-handle')).toHaveAttribute('transform', 'translate(308 455)');
+  await expect(page.locator('#spin')).toHaveValue('-1200');
+  await expect(page.locator('#target-handle')).toHaveAttribute('transform', target);
+  await selector.selectOption('R');
+  await expect(page.locator('#flight-path')).toHaveAttribute('d', original);
+  await selector.selectOption('L');
+  await page.locator('#pitcher-height').fill('210');
+  await page.locator('#release-handle').focus();
+  for (let i = 0; i < 10; i++) await page.keyboard.press('Shift+ArrowLeft');
+  const geometry = await page.locator('#field').evaluate((svg) => {
+    const hand = svg.querySelector('#throwing-hand');
+    const release = svg.querySelector('#release-handle');
+    const path = svg.querySelector('#flight-path');
+    const h = new DOMPoint(Number(hand.getAttribute('cx')), Number(hand.getAttribute('cy'))).matrixTransform(hand.getCTM());
+    const r = new DOMPoint(0, 0).matrixTransform(release.getCTM());
+    const start = path.getPointAtLength(0).matrixTransform(path.getCTM());
+    return { x: release.transform.baseVal.consolidate().matrix.e, handGap: Math.hypot(h.x - r.x, h.y - r.y), flightGap: Math.hypot(start.x - r.x, start.y - r.y) };
+  });
+  expect(geometry.x).toBe(208);
+  expect(geometry.handGap).toBeLessThan(0.01);
+  expect(geometry.flightGap).toBeLessThan(0.1);
+  await page.locator('[data-preset="curveball"]').click();
+  await expect(page.locator('#spin')).toHaveValue('2400');
+  await page.locator('#restart-button').click();
+  await expect(selector).toHaveValue('L');
+  await expect(page.locator('#release-handle')).toHaveAttribute('transform', /translate\(308 /);
+  await page.locator('#difficulty').selectOption('relief');
+  await expect(selector).toHaveValue('L');
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(320);
+  await setRandom(page, []);
+  await pitch(page, 3);
+  await expect(page.locator('#batter-hand')).toHaveText('Left-handed batter');
+  await expect(page.locator('#platoon-matchup')).toHaveText('LHP vs LHB: Pitcher advantage');
+  await page.screenshot({ path: 'test-results/platoon-mobile.png', fullPage: true });
+});
+
+test('matchups affect throws and history keeps each hand through review and replay', async ({ page }) => {
+  await page.goto('/');
+  await page.locator('#speed').fill('65');
+  await page.locator('#spin').fill('0');
+  // A nearly straight pitch at zone center puts the base miss chance near 0.08.
+  await page.locator('#target-handle').focus();
+  for (let i = 0; i < 7; i++) await page.keyboard.press('ArrowLeft');
+  for (let i = 0; i < 8; i++) await page.keyboard.press('ArrowDown');
+  await page.locator('#bend-handle').focus();
+  for (let i = 0; i < 4; i++) await page.keyboard.press('ArrowRight');
+  await setRandom(page, [0, 0.08, 0]);
+  await pitch(page);
+  await expect(page.locator('#call-title')).toHaveText('Swing and miss');
+  await expect(page.locator('#batter-height')).toHaveText('180 cm');
+  await expect(page.locator('#batter-hand')).toHaveText('Right-handed batter');
+  const trail = await page.locator('.pitch-trail path').getAttribute('d');
+  await setRandom(page, [0, 0.08, 0]);
+  await page.locator('#pitcher-hand').selectOption('L');
+  await expect(page.locator('.pitch-trail path')).toHaveAttribute('d', trail);
+  await expect(page.locator('#batter-height')).toHaveText('180 cm');
+  await expect(page.locator('#batter-hand')).toHaveText('Right-handed batter');
+  await pitch(page);
+  await expect(page.locator('#call-title')).toHaveText('Foul ball');
+  await expect(page.locator('#batter-height')).toHaveText('180 cm');
+  await expect(page.locator('#batter-hand')).toHaveText('Right-handed batter');
+  await setRandom(page, [0.99, 0.999, 0.5]);
+  await pitch(page, 1, false);
+  await expect(page.locator('#pitcher-hand')).toBeDisabled();
+  await expect(page.locator('#batter-height')).toHaveText('180 cm');
+  await expect(page.locator('#batter-hand')).toHaveText('Right-handed batter');
+  await expect(page.locator('#platoon-matchup')).toHaveText('LHP vs RHB: Batter advantage');
+  await page.locator('#next-batter').click();
+  await expect(page.locator('#batter-height')).toHaveText('205 cm');
+  await expect(page.locator('#batter-hand')).toHaveText('Left-handed batter');
+  await expect(page.locator('#batter')).toHaveAttribute('transform', /translate\(980 0\) scale\(-1 1\)/);
+  await expect(page.locator('#platoon-matchup')).toHaveText('LHP vs LHB: Pitcher advantage');
+  await pitch(page, 6);
+  const rows = page.locator('#results-table .result-pitch');
+  await expect(rows.nth(0)).toContainText('RHP vs RHB');
+  await expect(rows.nth(1)).toContainText('LHP vs RHB');
+  await expect(rows.nth(3)).toContainText('LHP vs LHB');
+  await expect(page.locator('#pitcher-hand')).toBeDisabled();
+  await setRandom(page, [0, 0.499]);
+  await page.locator('#play-again').click();
+  await expect(page.locator('#pitcher-hand')).toHaveValue('L');
+  await expect(page.locator('#pitcher-hand')).toBeEnabled();
+  await expect(page.locator('#batter-hand')).toHaveText('Right-handed batter');
+  await expect(page.locator('#batter-height')).toHaveText('165 cm');
 });

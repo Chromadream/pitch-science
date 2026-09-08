@@ -1,4 +1,6 @@
-export const BATTER_HEIGHTS = Object.freeze([180, 165, 198, 174, 190, 205, 170, 185, 195]);
+function createBatter(random) {
+  return { batterHeight: 165 + Math.floor(random() * 41), batterHand: random() < 0.5 ? 'R' : 'L' };
+}
 
 export function batterZone(height = 180) {
   // Standing SVG landmarks: feet at 370, shoulders at 243, knees around 333.
@@ -27,7 +29,7 @@ export const PITCH_TYPES = Object.freeze({
   slider: Object.freeze({ speed: 86, minSpeed: 60, maxSpeed: 99, spin: 1900, breakX: -70, breakY: -10, late: 1.2, maxX: 70, maxY: 170 }),
 });
 
-export function buildPitchFlight(type, target, bend = { x: 0, y: 0 }, spin = 0, release = RELEASE, speed = PITCH_TYPES[type]?.speed) {
+export function buildPitchFlight(type, target, bend = { x: 0, y: 0 }, spin = 0, release = RELEASE, speed = PITCH_TYPES[type]?.speed, pitcherHand = 'R') {
   if (!Object.hasOwn(PITCH_TYPES, type)) throw new RangeError(`Unknown pitch type: ${type}`);
   const pitch = PITCH_TYPES[type];
   const velocity = clamp(Number.isFinite(speed) ? speed : pitch.speed, pitch.minSpeed, pitch.maxSpeed);
@@ -39,7 +41,7 @@ export function buildPitchFlight(type, target, bend = { x: 0, y: 0 }, spin = 0, 
     const weight = Math.sin(Math.PI * t);
     const shape = weight * (1 + pitch.late * (t - 0.5));
     return {
-      x: release.x + (target.x - release.x) * t + pitch.breakX * shape + clamp(bend.x, -pitch.maxX, pitch.maxX) * weight,
+      x: release.x + (target.x - release.x) * t + pitch.breakX * (pitcherHand === 'L' ? -1 : 1) * shape + clamp(bend.x, -pitch.maxX, pitch.maxX) * weight,
       y: release.y + (target.y - release.y) * t + pitch.breakY * shape + (clamp(bend.y, -pitch.maxY, pitch.maxY) - loft) * weight,
     };
   });
@@ -74,10 +76,12 @@ const titles = {
   'in-play-out': 'In-play out',
 };
 
-export function createGame(scenario = 'exhibition') {
+export function createGame(scenario = 'exhibition', pitcherHand = 'R', random = Math.random) {
   if (!Object.hasOwn(SCENARIOS, scenario)) throw new RangeError(`Unknown scenario: ${scenario}`);
+  if (pitcherHand !== 'R' && pitcherHand !== 'L') throw new RangeError(`Unknown pitcher hand: ${pitcherHand}`);
   return {
     scenario,
+    pitcherHand,
     playerScore: SCENARIOS[scenario].playerScore,
     opponentScore: SCENARIOS[scenario].opponentScore,
     save: null,
@@ -89,7 +93,7 @@ export function createGame(scenario = 'exhibition') {
     pitches: 0,
     strikeouts: 0,
     batters: 0,
-    batterHeight: BATTER_HEIGHTS[0],
+    ...createBatter(random),
     bases: [false, false, false],
     history: [],
     over: false,
@@ -98,7 +102,7 @@ export function createGame(scenario = 'exhibition') {
   };
 }
 
-export function resolvePitch(game, outcome, metadata = {}) {
+export function resolvePitch(game, outcome, metadata = {}, random = Math.random) {
   if (game.over) return game;
   if (!Object.hasOwn(titles, outcome)) throw new RangeError(`Unknown pitch outcome: ${outcome}`);
 
@@ -165,7 +169,9 @@ export function resolvePitch(game, outcome, metadata = {}) {
   if (scored) detail += ` ${scored} run${scored === 1 ? '' : 's'} scored.`;
 
   next.over = next.outs >= 3;
-  if (completed && !next.over) next.batterHeight = BATTER_HEIGHTS[next.batters % BATTER_HEIGHTS.length];
+  if (completed && !next.over) {
+    Object.assign(next, createBatter(random));
+  }
   next.win = next.over && next.runs === 0
     ? (next.strikeouts === 3 && next.pitches === 9 ? 'perfect' : 'normal')
     : null;
@@ -174,7 +180,8 @@ export function resolvePitch(game, outcome, metadata = {}) {
   }
   const immaculateAlive = next.pitches === next.strikeouts * 3 + next.strikes && next.batters === next.strikeouts && next.pitches <= 9;
   next.lastResult = {
-    ...metadata, batterHeight: game.batterHeight, batterNumber: game.batters + 1,
+    ...metadata, pitcherHand: game.pitcherHand, batterHand: game.batterHand,
+    batterHeight: game.batterHeight, batterNumber: game.batters + 1,
     ballsBefore: game.balls, strikesBefore: game.strikes, immaculateAlive,
     title, detail, outcome,
   };
@@ -249,12 +256,14 @@ export function judgePitch({ points, speed = 85, spin = 0, game, pitchType }, ra
     ? (hard ? 0.94 - 0.08 * edge : 0.78 - 0.14 * edge)
     : (0.10 + 0.30 * Math.exp(-distance / 45) + 0.12 * difficulty) * (hard ? 0.4 : 1);
   if (random() >= swingChance) return strike ? 'called-strike' : 'ball';
-  const missChance = (0.08 + 0.48 * difficulty + (strike ? 0 : 0.22)) * (hard ? 0.45 : 1);
+  // Arcade matchup tuning, not empirical platoon statistics.
+  const sameHand = (game?.pitcherHand ?? 'R') === (game?.batterHand ?? 'R');
+  const missChance = clamp((0.08 + 0.48 * difficulty + (strike ? 0 : 0.22)) * (hard ? 0.45 : 1) * (sameHand ? 1.15 : 0.85), 0, 1);
   if (random() < missChance) return 'swinging-strike';
   const contact = random();
   const foulChance = hard ? 0.22 + 0.08 * difficulty : 0.28 + 0.12 * difficulty;
   if (contact < foulChance) return 'foul';
-  if (contact < foulChance + (hard ? 0.12 + 0.08 * difficulty : 0.24 + 0.12 * difficulty)) return 'in-play-out';
+  if (contact < foulChance + (hard ? 0.12 + 0.08 * difficulty : 0.24 + 0.12 * difficulty) + (sameHand ? 0.03 : -0.03)) return 'in-play-out';
   const hit = random();
   if (hit < (hard ? 0.46 + 0.10 * difficulty : 0.62 + 0.12 * difficulty)) return 'single';
   if (hit < (hard ? 0.74 + 0.06 * difficulty : 0.86 + 0.06 * difficulty)) return 'double';

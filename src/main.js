@@ -109,6 +109,7 @@ document.querySelector('#app').innerHTML = `
             </g>
             <g id="pitcher-plane" transform="${pitchPlaneTransform(0)}">
             <g id="pitcher" aria-label="Pitcher seen from behind, throwing toward home plate" stroke-linecap="round" stroke-linejoin="round" pointer-events="none">
+              <g id="pitcher-handedness">
               <ellipse cx="397" cy="572" rx="72" ry="14" fill="#645d43" opacity=".3"/>
               <path d="m371 508-15 35 0 29m37-63 17 29 22 18" fill="none" stroke="#eae5d3" stroke-width="23"/>
               <path d="m390 520 15 22 20 17" fill="none" stroke="#c6cbb7" stroke-width="7"/>
@@ -127,6 +128,7 @@ document.querySelector('#app').innerHTML = `
               <path id="throwing-arm" fill="none" stroke="#d3a17a" stroke-width="13"/>
               <path id="throwing-sleeve" fill="none" stroke="#eae6d4" stroke-width="18"/>
               <circle id="throwing-hand" r="9" fill="#d3a17a"/>
+              </g>
             </g>
             <g id="release-depth" pointer-events="none" aria-hidden="true">
               <ellipse id="release-shadow" rx="13" ry="4" fill="#6c5e41" opacity=".5"/>
@@ -155,8 +157,8 @@ document.querySelector('#app').innerHTML = `
         <div id="at-bat-review" class="at-bat-review" hidden><div aria-live="polite"><strong id="review-title"></strong><p id="review-detail"></p></div><button id="next-batter" class="primary-button">Next batter <span>↗</span></button></div>
         <div class="trail-legend" aria-label="Pitch outcome colors">${Object.values(trailResults).map(({ color, label, code }) => `<span><i style="background:${color}" aria-hidden="true"></i><b>${code}</b> ${label}</span>`).join('')}<small>Fouls before two strikes count as strikes.</small></div>
         <div class="body-controls">
-          <div class="height-control"><label for="pitcher-height">Pitcher height <output id="pitcher-height-value" for="pitcher-height">180 cm</output></label><input id="pitcher-height" type="range" min="160" max="210" value="180" aria-describedby="height-help"/><p id="height-help">Changes body height and release angle. Your arm slot stays relative to your body.</p></div>
-          <div class="batter-info" aria-live="polite"><span id="batter-number">BATTER 01</span><strong id="batter-height">180 cm</strong><small>Strike zone: shoulders to knees.<br>Height changes with each new batter.</small></div>
+          <div class="pitcher-controls"><div class="scenario-select hand-control"><label for="pitcher-hand">Pitcher handedness</label><select id="pitcher-hand" aria-describedby="matchup-help"><option value="R">Right-handed</option><option value="L">Left-handed</option></select></div><div class="height-control"><label for="pitcher-height">Pitcher height <output id="pitcher-height-value" for="pitcher-height">180 cm</output></label><input id="pitcher-height" type="range" min="160" max="210" value="180" aria-describedby="height-help pitcher-height-status"/><span id="pitcher-height-status" role="status" hidden>Locked for this inning</span><p id="height-help">Set before the inning's first pitch. It changes body height and release angle while preserving your arm slot.</p></div></div>
+          <div class="batter-info" aria-live="polite"><span id="batter-number">BATTER 01</span><strong id="batter-height"></strong><span id="batter-hand"></span><small id="platoon-matchup"></small><small id="matchup-help">Same hand favors the pitcher. Opposite hands favor the batter.</small><small>Strike zone: shoulders to knees.<br>Each new batter gets a random height and batting side.</small></div>
         </div>
       </section>
       <aside class="pitch-panel">
@@ -197,7 +199,7 @@ let gesture = null;
 let currentPreset = 'fastball';
 let pendingScenario = null;
 function updatePath() {
-  flight = buildPitchFlight(currentPreset, target, bend, Number($('#spin').value), release, Number($('#speed').value));
+  flight = buildPitchFlight(currentPreset, target, bend, Number($('#spin').value), release, Number($('#speed').value), game.pitcherHand);
   const pathData = (path) => path.map((p, i) => `${i ? 'L' : 'M'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
   const projected = flight.map((point, index) => projectPitchPoint(point, index / (flight.length - 1)));
   $('#flight-path').setAttribute('d', pathData(projected));
@@ -205,8 +207,13 @@ function updatePath() {
   for (const [id, point] of [['release', release], ['bend', flight[30]], ['target', target]]) {
     $(`#${id}-handle`).setAttribute('transform', `translate(${point.x} ${point.y})`);
   }
-  const hand = { x: release.x, y: 580 + (release.y - 580) * 180 / pitcherHeight };
+  // The artwork uses a right-handed pose centered on x=379.
+  const leftHanded = game.pitcherHand === 'L';
+  const hand = { x: leftHanded ? 758 - release.x : release.x, y: 580 + (release.y - 580) * 180 / pitcherHeight };
   $('#pitcher').setAttribute('transform', `translate(0 580) scale(1 ${pitcherHeight / 180}) translate(0 -580)`);
+  $('#pitcher-handedness').setAttribute('transform', leftHanded ? 'translate(758 0) scale(-1 1)' : '');
+  $('#pitcher-handedness text').setAttribute('transform', leftHanded ? 'translate(754 0) scale(-1 1)' : '');
+  $('#pitcher').setAttribute('aria-label', `${leftHanded ? 'Left' : 'Right'}-handed pitcher seen from behind, throwing toward home plate`);
   const elbow = { x: 403 + (hand.x - 403) * 0.48, y: 466 + (hand.y - 466) * 0.3 };
   $('#throwing-arm').setAttribute('d', `M400 452 Q${elbow.x} ${elbow.y} ${hand.x} ${hand.y}`);
   $('#throwing-sleeve').setAttribute('d', `M400 452 L${400 + (elbow.x - 400) * 0.5} ${452 + (elbow.y - 452) * 0.5}`);
@@ -247,21 +254,27 @@ function selectPreset(name) {
   $('#speed').min = preset.minSpeed;
   $('#speed').max = preset.maxSpeed;
   $('#speed').value = preset.speed;
-  $('#spin').value = preset.spin;
+  $('#spin').value = preset.spin * (game.pitcherHand === 'L' ? -1 : 1);
   hideCall();
   updateControls();
 }
 
 function renderGame() {
   const batterHeight = reviewing ? game.lastResult.batterHeight : game.batterHeight;
+  const batterHand = reviewing ? game.lastResult.batterHand : game.batterHand;
+  const pitcherHand = reviewing ? game.lastResult.pitcherHand : game.pitcherHand;
   const zone = batterZone(batterHeight);
-  $('#batter').setAttribute('transform', `translate(0 370) scale(1 ${batterHeight / 180}) translate(0 -370)`);
-  $('#batter').setAttribute('aria-label', `Standing batter, ${batterHeight} centimeters tall`);
+  $('#batter').setAttribute('transform', `translate(0 370) scale(1 ${batterHeight / 180}) translate(0 -370)${batterHand === 'L' ? ' translate(980 0) scale(-1 1)' : ''}`);
+  $('#batter text').setAttribute('transform', batterHand === 'L' ? 'translate(760 0) scale(-1 1)' : '');
+  $('#batter').setAttribute('aria-label', `${batterHand === 'L' ? 'Left' : 'Right'}-handed standing batter, ${batterHeight} centimeters tall`);
+  $('#pitcher-hand').value = pitcherHand;
+  $('#batter-hand').textContent = `${batterHand === 'L' ? 'Left' : 'Right'}-handed batter`;
+  $('#platoon-matchup').textContent = `${pitcherHand}HP vs ${batterHand}HB: ${pitcherHand === batterHand ? 'Pitcher advantage' : 'Batter advantage'}`;
   $('#batter-height').textContent = `${batterHeight} cm`;
   $('#batter-number').textContent = `BATTER ${String(game.batters + (game.over || reviewing ? 0 : 1)).padStart(2, '0')}`;
   for (const [attribute, value] of Object.entries(zone)) $('#strike-zone rect').setAttribute(attribute, value);
   $('#zone-grid').setAttribute('d', `M${zone.x + zone.width / 3} ${zone.y}v${zone.height}m${zone.width / 3} ${-zone.height}v${zone.height}M${zone.x} ${zone.y + zone.height / 3}h${zone.width}m${-zone.width} ${zone.height / 3}h${zone.width}`);
-  $('#body-zone-guides').setAttribute('d', `M402 ${zone.y}H440M402 ${zone.y + zone.height}H440`);
+  $('#body-zone-guides').setAttribute('d', batterHand === 'L' ? `M578 ${zone.y}H540M578 ${zone.y + zone.height}H540` : `M402 ${zone.y}H440M402 ${zone.y + zone.height}H440`);
   $('#strike-zone text').setAttribute('y', zone.y - 14);
   const scenario = SCENARIOS[game.scenario];
   $('#difficulty').value = game.scenario;
@@ -295,7 +308,7 @@ function renderGame() {
     $('#pitch-log').innerHTML = game.history.slice(-5).reverse().map((pitch) => {
       const type = pitchResultType(pitch.outcome, pitch.strikesBefore);
       const result = trailResults[type];
-      return `<div class="log-pitch" data-result="${type}"><span class="log-number">${String(pitch.number).padStart(2, '0')}</span><div><strong><span class="log-outcome" style="--outcome-color:${result.color}" aria-label="${result.label}"><i aria-hidden="true"></i>${result.code}</span> ${pitch.title}</strong><small>${pitch.speed} MPH <span>·</span> ${Number(pitch.spin).toLocaleString('en-US')} RPM</small></div></div>`;
+      return `<div class="log-pitch" data-result="${type}"><span class="log-number">${String(pitch.number).padStart(2, '0')}</span><div><strong><span class="log-outcome" style="--outcome-color:${result.color}" aria-label="${result.label}"><i aria-hidden="true"></i>${result.code}</span> ${pitch.title}</strong><small>${pitch.speed} MPH <span>·</span> ${Number(pitch.spin).toLocaleString('en-US')} RPM<br>${pitch.pitcherHand}HP vs ${pitch.batterHand}HB</small></div></div>`;
     }).join('');
   } else $('#pitch-log').innerHTML = '<span class="log-empty">A fresh inning. Make the first pitch count.</span>';
   if (game.over && !reviewing) showEnd();
@@ -315,7 +328,10 @@ function setBusy(value) {
   $('#field-instruction').classList.toggle('invisible', value || game.over || reviewing);
   $('#at-bat-review').hidden = !reviewing;
   $('#throw-button').innerHTML = value ? 'Pitching<span class="throw-dots">...</span>' : 'Throw pitch <span>↗</span>';
-  document.querySelectorAll('#speed, #spin, #pitcher-height, [data-preset], #reset-path').forEach((el) => { el.disabled = value || game.over || reviewing; });
+  document.querySelectorAll('#speed, #spin, #pitcher-hand, [data-preset], #reset-path').forEach((el) => { el.disabled = value || game.over || reviewing; });
+  const heightLocked = game.pitches > 0;
+  $('#pitcher-height').disabled = value || heightLocked || game.over || reviewing;
+  $('#pitcher-height-status').hidden = !heightLocked;
   $('#difficulty').disabled = value;
   document.querySelectorAll('.path-handle').forEach((el) => { el.setAttribute('tabindex', value || game.over || reviewing ? '-1' : '0'); });
   updatePath();
@@ -395,7 +411,7 @@ function showEnd() {
       batterNumber = pitch.batterNumber;
       body = $('#results-table').createTBody();
       body.dataset.batter = batterNumber;
-      body.insertAdjacentHTML('beforeend', `<tr class="batter-group"><th scope="rowgroup" colspan="6">Batter ${batterNumber} <span>${pitch.batterHeight} cm</span></th></tr>`);
+      body.insertAdjacentHTML('beforeend', `<tr class="batter-group"><th scope="rowgroup" colspan="6">Batter ${batterNumber} <span>${pitch.batterHeight} cm / ${pitch.batterHand}HB</span></th></tr>`);
     }
     const ended = pitch === bidEnded;
     const result = pitch.outcome === 'foul'
@@ -406,6 +422,10 @@ function showEnd() {
     row.dataset.pitch = pitch.number;
     const values = [pitch.number, pitch.pitchType ? pitch.pitchType[0].toUpperCase() + pitch.pitchType.slice(1) : 'Not recorded', pitch.speed ?? '-', pitch.spin?.toLocaleString('en-US') ?? '-', `${pitch.ballsBefore}-${pitch.strikesBefore}`, result];
     values.forEach((value) => { row.insertCell().textContent = value; });
+    const matchup = document.createElement('small');
+    matchup.className = 'result-matchup';
+    matchup.textContent = `${pitch.pitcherHand}HP vs ${pitch.batterHand}HB`;
+    row.cells[1].append(matchup);
     if (ended) {
       const note = document.createElement('strong');
       note.className = 'bid-ended-note';
@@ -420,11 +440,12 @@ function showEnd() {
 function resetGame(scenario = game.scenario) {
   cancelAnimationFrame(frame);
   hideCall();
-  game = createGame(scenario);
+  game = createGame(scenario, game.pitcherHand);
   reviewing = false;
   $('#at-bat-trails').replaceChildren();
   target = { x: 511, y: 264 };
   release = pitcherPoint(RELEASE, pitcherHeight);
+  if (game.pitcherHand === 'L') release.x = 758 - release.x;
   bend = { x: 0, y: 0 };
   gesture = null;
   $('#moving-ball').setAttribute('visibility', 'hidden');
@@ -456,7 +477,9 @@ function moveHandle(mode, point) {
   } else if (mode === 'release-handle') {
     const upper = pitcherPoint({ x: 0, y: RELEASE_BOUNDS.minY }, pitcherHeight).y;
     const lower = pitcherPoint({ x: 0, y: RELEASE_BOUNDS.maxY }, pitcherHeight).y;
-    release = { x: Math.max(RELEASE_BOUNDS.minX, Math.min(RELEASE_BOUNDS.maxX, point.x)), y: Math.max(upper, Math.min(lower, point.y)) };
+    const minX = game.pitcherHand === 'L' ? 758 - RELEASE_BOUNDS.maxX : RELEASE_BOUNDS.minX;
+    const maxX = game.pitcherHand === 'L' ? 758 - RELEASE_BOUNDS.minX : RELEASE_BOUNDS.maxX;
+    release = { x: Math.max(minX, Math.min(maxX, point.x)), y: Math.max(upper, Math.min(lower, point.y)) };
   } else {
     const pitch = PITCH_TYPES[currentPreset];
     bend = { x: Math.max(-pitch.maxX, Math.min(pitch.maxX, point.x)), y: Math.max(-pitch.maxY, Math.min(pitch.maxY, point.y)) };
@@ -494,6 +517,21 @@ document.querySelectorAll('.path-handle').forEach((handle) => handle.addEventLis
   });
 }));
 for (const id of ['speed', 'spin']) $(`#${id}`).addEventListener('input', updateControls);
+$('#pitcher-hand').addEventListener('change', () => {
+  if (busy || game.over || reviewing || gesture) {
+    $('#pitcher-hand').value = game.pitcherHand;
+    return;
+  }
+  const pitcherHand = $('#pitcher-hand').value;
+  if (pitcherHand === game.pitcherHand) return;
+  game = { ...game, pitcherHand };
+  release = { ...release, x: 758 - release.x };
+  bend = { ...bend, x: -bend.x };
+  $('#spin').value = -Number($('#spin').value);
+  hideCall();
+  updateControls();
+  renderGame();
+});
 $('#pitcher-height').addEventListener('input', () => {
   const hand = { x: release.x, y: 580 + (release.y - 580) * 180 / pitcherHeight };
   pitcherHeight = Number($('#pitcher-height').value);
@@ -552,9 +590,10 @@ $('#restart-dialog').addEventListener('cancel', () => {
   pendingScenario = null;
 });
 $('#help-dialog .final-rule').insertAdjacentHTML('beforebegin', '<h3>Choose your situation.</h3><p>Exhibition is the original scoreless challenge. CGSO means complete-game shutout: you already pitched eight scoreless innings, and your home team leads 1-0 in the top of the ninth. Three more scoreless outs finish the game without a bottom half. Only this final inning is playable.</p><p>CGSO is hard mode. Batters chase fewer balls, attack more strikes, miss less often, and turn more contact into hits and extra bases. Location, movement, and speed changes still help.</p><p>Relief pitching starts in the bottom of the ninth with your visiting team ahead 4-3 and a save opportunity. Every mode starts with empty bases and no outs. Exhibition and Relief use the standard batting difficulty.</p><p>In relief mode, a Normal Win or Perfect Win also earns a Save. Allowing the tying run is a Blown Save, even if the score stays tied. Finish all three outs in every mode, including after a tying or go-ahead run.</p>');
-$('#help-dialog ol').insertAdjacentHTML('afterend', '<h3>Height changes the matchup.</h3><p>Set pitcher height from 160 to 210 cm. Your feet stay on the mound, while your body, arm, and release height change together. This changes the flight angle, not the target or pitch speed. Height stays selected when you restart.</p><p>Batters follow a varied nine-player lineup from 165 to 205 cm. Height stays fixed during each at-bat and changes after a hit, walk, or out. The arcade strike zone runs from the standing batter\'s shoulders to their knees, with a fixed plate width. The drawn zone and umpire use exactly the same boundaries. Your target does not move when a new batter arrives, so check your aim.</p>');
+$('#help-dialog ol').insertAdjacentHTML('afterend', '<h3>Height changes the matchup.</h3><p>Set pitcher height from 160 to 210 cm. Your feet stay on the mound, while your body, arm, and release height change together. This changes the flight angle, not the target or pitch speed. Height stays selected when you restart.</p><p>Every new batter, including the first batter, gets a random whole-centimeter height from 165 to 205 cm and an independently random batting side. Both sides are equally likely. There is no repeating lineup; consecutive batters can share either attribute. Both attributes stay fixed during the at-bat and its review. Restarting generates a fresh batter.</p><p>The arcade strike zone runs from the standing batter\'s shoulders to their knees, with a fixed plate width. The drawn zone and umpire use exactly the same boundaries. Your target does not move when a new batter arrives, so check your aim.</p>');
 $('#help-dialog ol').insertAdjacentHTML('afterend', '<h3>Lob it or let it rise.</h3><p>Fastballs range from 60 to 120 MPH, sliders from 60 to 99 MPH, and curveballs from 30 to 90 MPH. Curveballs below 65 MPH gain an eephus-style arc, largest at 30 MPH. Drag BEND up for an even higher loop that drops into the target.</p><p>Every pitch type supports upward ride. Drag BEND down to place the middle of the flight below the target, then watch the ball climb into the zone. This is arcade-style movement. Spin still bends sideways. The release and target stay fixed, and extreme bends stay within the field view.</p>');
 $('#help-dialog ol').insertAdjacentHTML('afterend', '<p>Dashed trails with numbered endpoints show completed pitches in the current at-bat. After a hit, walk, or out, review all pitches and select Next batter to continue. The batter and strike zone stay in place until you advance. After the third out, select View results when you finish reviewing.</p>');
+$('#help-dialog ol').insertAdjacentHTML('afterend', '<h3>Play the platoon matchup.</h3><p>Choose a right- or left-handed pitcher. Matching the batter\'s hand favors the pitcher with more misses and in-play outs. Opposite-handed batters make contact more often and turn more contact into hits. These are small arcade adjustments, not guaranteed outcomes or measured MLB splits. Taken ball and strike calls never change.</p><p>The lineup includes right- and left-handed batters. Their batting side stays fixed through each at-bat and its review. You can change pitching hands between pitches, an arcade option rather than an MLB rule. Your selection stays through restarts and scenario changes.</p><p>Changing hands mirrors the throwing arm, release reach, horizontal bend, and spin while keeping your target. Pitch presets also mirror their sideways movement. The spin slider still controls left or right break as labeled.</p>');
 $('#theme-button').addEventListener('click', () => {
   const dark = document.documentElement.dataset.theme ? document.documentElement.dataset.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
   document.documentElement.dataset.theme = dark ? 'light' : 'dark';

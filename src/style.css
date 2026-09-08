@@ -18,6 +18,8 @@
 @media(max-width:1150px){.field-instruction>span:last-child{display:inline}.instruction-divider{display:block}}
 @media(max-width:540px){.field-instruction{gap:5px;font-size:7px}.trajectory-heading>span{font-size:10px}#release-marker text{font-size:11px}.path-handle text{font-size:13px}}
 
+.hand-control{margin-bottom:18px}.pitcher-controls{min-width:0}#platoon-matchup{font-weight:700;color:var(--ink)}.result-matchup{display:block;margin-top:4px;font-size:10px;color:#d4ddcc}
+
 /* SVG group touch-action varies by browser; reserve field gestures for pitching. */
 #field{touch-action:none}
 #pitching-mound,#release-depth{pointer-events:none}
@@ -37,3 +39,4 @@
 @media(max-width:1150px) and (min-width:851px){.game-layout{grid-template-columns:170px minmax(0,1fr);grid-template-areas:"progress field" "controls field"}.pitch-panel{padding:16px}.panel-heading{gap:5px}.panel-heading h2{font-size:14px}.pitch-presets button{font-size:8px}.body-controls{gap:15px;padding:15px}.field-footer{gap:10px}}
 @media(max-width:850px){.game-layout{grid-template-columns:minmax(0,1fr);grid-template-areas:"field" "controls" "progress"}.inning-strip{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px;padding:20px}.inning-strip .pitch-log{grid-column:1;grid-row:2}.inning-strip .challenge-progress{grid-column:2;grid-row:1/3;border-top:0;border-left:1px solid var(--line);padding:0 0 0 18px}}
 .log-outcome{display:inline-flex;align-items:center;gap:4px;font-size:9px;font-weight:700}.log-outcome i{display:inline-block;width:9px;height:9px;flex-shrink:0;background:var(--outcome-color);border:1px solid var(--ink);border-radius:50%}
+#pitcher-height:disabled{cursor:not-allowed;filter:grayscale(1);opacity:.38}#pitcher-height:disabled~#pitcher-height-status{display:inline-flex;align-items:center;width:max-content;margin-top:9px;padding:3px 6px;border:1px solid var(--line);border-radius:3px;font-size:8px;font-weight:700;letter-spacing:.8px;line-height:1;color:var(--muted);text-transform:uppercase}.height-control:has(#pitcher-height:disabled) label,.height-control:has(#pitcher-height:disabled) output{color:var(--muted)}
