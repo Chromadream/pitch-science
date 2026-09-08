@@ -142,6 +142,21 @@ PLAYWRIGHT_CHROME=1 npm run test:browser
 
 The rules tests cover scoring, walks, strike-zone boundaries, pitch outcomes, and win conditions. Browser tests cover full innings and desktop and mobile controls.
 
+## Deploy
+
+The GitHub Pages workflow runs the rules tests, builds the game, and deploys `dist/` whenever a commit reaches `main`. You can also run it manually from the repository's Actions tab.
+
+Before the first deployment, open **Settings > Pages** in the GitHub repository and set **Source** to **GitHub Actions**. The workflow reads the Pages base path during the build, so both project URLs such as `https://<user>.github.io/pitch-science/` and custom domains resolve assets correctly.
+
+To test a project Pages build locally:
+
+```sh
+BASE_PATH=/pitch-science npm run build
+npm run preview
+```
+
+The workflow publishes the generated files as a Pages artifact. It does not commit `dist/` to the repository.
+
 ## Files
 
 - `src/engine.js`: pure baseball rules and pitch simulation.
