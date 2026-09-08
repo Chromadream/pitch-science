@@ -149,6 +149,12 @@ document.querySelector('#app').innerHTML = `
             </g>
             <g id="moving-ball" visibility="hidden"><circle r="10" fill="#fffbed" stroke="#d6d3ba"/><path d="M-5-8q8 8 0 16M5-8q-8 8 0 16" fill="none" stroke="#b6604f" stroke-width="1.5"/></g>
           </svg>
+          <div class="field-zoom" role="group" aria-label="Field zoom">
+            <button id="zoom-out" aria-label="Zoom out of field" aria-controls="field" title="Zoom out" disabled>-</button>
+            <button id="zoom-in" aria-label="Zoom into field" aria-controls="field" title="Zoom in">+</button>
+            <button id="zoom-reset" aria-label="Reset field view" aria-controls="field" title="Reset field view">Reset</button>
+            <output id="zoom-level" aria-live="polite" aria-label="Field zoom level">100%</output>
+          </div>
           <section class="pitch-chart" id="pitch-chart" aria-label="Pitch locations for this batter">
             <div class="pitch-chart-heading"><h2>Pitch locations</h2><span id="chart-batter"></span></div>
             <svg id="pitch-chart-plot" viewBox="390 200 200 180" role="group" aria-label="Front view of the strike zone. Numbers show pitch order.">
@@ -193,15 +199,27 @@ document.querySelector('#app').innerHTML = `
         <div class="objective"><span class="objective-icon">${baseball}</span><div><strong>Keep a clean sheet.</strong><p>Three outs. Zero runs. That's a win.<br> Nine pitches, three K's? That's perfect.</p></div></div>
       </aside>
     </div>
-    <footer class="page-footer"><span>BASEBALL, WITH A LITTLE SCIENCE.</span><span>No fielding. No shortcuts. Just you and the strike zone.</span><button id="restart-button" class="small-button">↺ Restart inning</button></footer>
+    <footer class="page-footer"><span>BASEBALL, WITH A LITTLE SCIENCE.</span><span>No fielding. No shortcuts. Just you and the strike zone.</span><button id="history-button" class="small-button mobile-only">Inning history</button><button id="restart-button" class="small-button">↺ Restart inning</button></footer>
   </main>
   <dialog id="help-dialog"><button class="dialog-close" id="close-help" aria-label="Close instructions">×</button><div class="edition">THE ONE-INNING CHALLENGE</div><h2>Aim small. Pitch big.</h2><p>You're the pitcher. Retire three batters before the inning ends.</p>
     <ol><li><strong>Pick a pitch type.</strong> Fastball has a small break, curveball has a looping drop, and slider breaks sideways later in flight.</li><li><strong>Set your release.</strong> Drag RELEASE at the foreground pitcher's throwing hand. Up and down changes arm height; left and right changes reach. The arm follows your hand. The dashed guide connects your release to its ground shadow on the raised mound.</li><li><strong>Aim and shape.</strong> Drag TARGET to aim at the plate. Drag BEND, or the curve itself, to adjust the break within the pitch type's range. Focus any handle and use arrow keys for fine adjustments. Shift makes larger adjustments.</li><li><strong>Let it fly.</strong> Set velocity and spin, then press Throw pitch or Space. Spin bends the preview without moving the target or release. Reset curve restores the selected type's bend while keeping your release, aim, and slider settings.</li></ol>
     <h3>The umpire has the last word.</h3><p>A taken pitch touching the strike zone is a strike; outside is a ball. A swing and miss is always a strike. Four balls means a walk. Three strikes means an out. Fouls cannot add a third strike.</p><p>Contact can be a foul, an automatic out, or a hit. Hits advance every runner by the hit distance. On outs, runners hold. Walks advance only forced runners. No fielding, steals, or double plays.</p><div class="rules-wins"><p><strong>Normal Win</strong><br>Finish with zero runs allowed. Hits are okay.</p><p><strong>Perfect Win</strong><br>An immaculate inning: three strikeouts on exactly nine pitches.</p></div><p class="final-rule">A run does not end the game. Keep pitching until you record three outs.</p><button id="start-playing" class="primary-button">Back to the mound <span>↗</span></button></dialog>
   <dialog id="restart-dialog"><h2>Start a fresh inning?</h2><p>Your current inning and pitch history will be cleared.</p><div class="dialog-actions"><button id="cancel-restart" class="secondary-button">Keep pitching</button><button id="confirm-restart" class="primary-button">Restart inning</button></div></dialog>
+  <dialog id="history-dialog" aria-label="Inning history"><form method="dialog" class="history-close"><button class="secondary-button">Back to game</button></form></dialog>
 `;
 
 const $ = (selector) => document.querySelector(selector);
+// Keep one copy of live history, with a separate view on compact screens.
+const compactLayout = matchMedia('(max-width: 850px), (max-height: 500px) and (pointer: coarse)');
+function placeHistory() {
+  const compact = compactLayout.matches;
+  (compact ? $('#history-dialog') : $('.game-layout')).prepend($('.inning-strip'));
+  (compact ? $('#history-dialog') : $('#end-screen')).append($('.results-history'));
+  if (!compact) $('#history-dialog').close();
+}
+compactLayout.addEventListener('change', placeHistory);
+placeHistory();
+$('#history-button').addEventListener('click', () => $('#history-dialog').showModal());
 let game = createGame();
 let busy = false;
 let reviewing = false;
@@ -382,7 +400,7 @@ function setBusy(value) {
 }
 
 function throwPitch() {
-  if (busy || game.over || reviewing || gesture) return;
+  if (busy || game.over || reviewing || gesture || fieldPointers.size) return;
   hideCall();
   setBusy(true);
   const speed = Number($('#speed').value);
@@ -479,6 +497,7 @@ function showEnd() {
     }
   }
   $('#end-screen').hidden = false;
+  $('.results-history').hidden = false;
   $('#play-again').focus({ preventScroll: true });
 }
 
@@ -493,8 +512,13 @@ function resetGame(scenario = game.scenario) {
   if (game.pitcherHand === 'L') release.x = 758 - release.x;
   bend = { x: 0, y: 0 };
   gesture = null;
+  fieldNavigation = null;
+  for (const id of fieldPointers.keys()) if (field.hasPointerCapture(id)) field.releasePointerCapture(id);
+  fieldPointers.clear();
+  setFieldView({ x: 0, y: 0, width: 1000, height: 640 });
   $('#moving-ball').setAttribute('visibility', 'hidden');
   $('#end-screen').hidden = true;
+  $('.results-history').hidden = true;
   $('#batter').classList.remove('swinging');
   setBusy(false);
   selectPreset('fastball');
@@ -502,19 +526,70 @@ function resetGame(scenario = game.scenario) {
 }
 
 const field = $('#field');
+let fieldView = { x: 0, y: 0, width: 1000, height: 640 };
+const fieldPointers = new Map();
+let fieldNavigation = null;
+
+function setFieldView(view) {
+  const width = Math.max(250, Math.min(1000, view.width));
+  const height = width * 0.64;
+  fieldView = { x: Math.max(0, Math.min(1000 - width, view.x)), y: Math.max(0, Math.min(640 - height, view.y)), width, height };
+  field.setAttribute('viewBox', `${fieldView.x} ${fieldView.y} ${width} ${height}`);
+  field.classList.toggle('zoomed', width < 1000);
+  $('#zoom-out').disabled = width >= 1000;
+  $('#zoom-in').disabled = width <= 250;
+  $('#zoom-level').value = `${Math.round(100000 / width)}%`;
+}
+
+for (const [id, factor] of [['zoom-in', 1.5], ['zoom-out', 1 / 1.5], ['zoom-reset', 0]]) {
+  $(`#${id}`).addEventListener('click', () => {
+    if (fieldPointers.size) return;
+    if (!factor) {
+      setFieldView({ x: 0, y: 0, width: 1000 });
+      return;
+    }
+    const width = Math.max(250, Math.min(1000, fieldView.width / factor));
+    // Button zoom favors the target; pinching uses the fingers' focal point instead.
+    const anchor = projectPitchPoint(target, 1);
+    const ratio = width / fieldView.width;
+    setFieldView({ x: anchor.x - (anchor.x - fieldView.x) * ratio, y: anchor.y - (anchor.y - fieldView.y) * ratio, width });
+  });
+}
+
 function fieldPoint(event, mode) {
   const plane = mode === 'release-handle' ? $('#release-plane') : mode === 'target-handle' ? $('#target-plane') : $('#bend-plane');
   return new DOMPoint(event.clientX, event.clientY).matrixTransform(plane.getScreenCTM().inverse());
 }
 field.addEventListener('pointerdown', (event) => {
-  if (busy || game.over || reviewing || gesture || event.button !== 0) return;
-  const handle = event.target.closest('.path-handle');
-  if (!handle && event.target.id !== 'curve-hit-area') return;
+  if (event.button !== 0 || (game.over && !reviewing)) return;
   event.preventDefault();
+  fieldPointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+  field.setPointerCapture(event.pointerId);
+  if (fieldPointers.size === 2) {
+    // A second finger belongs to navigation, not to the pitch that the first finger touched.
+    if (gesture) {
+      ({ target, release, bend } = gesture);
+      gesture = null;
+      updatePath();
+    }
+    const [a, b] = [...fieldPointers.values()];
+    const matrix = field.getScreenCTM().inverse();
+    const anchor = new DOMPoint((a.x + b.x) / 2, (a.y + b.y) / 2).matrixTransform(matrix);
+    fieldNavigation = { mode: 'pinch', view: { ...fieldView }, matrix, anchor, distance: Math.max(1, Math.hypot(a.x - b.x, a.y - b.y)) };
+    return;
+  }
+  if (fieldPointers.size !== 1) return;
+  const handle = event.target.closest('.path-handle');
+  if (busy || reviewing || (!handle && event.target.id !== 'curve-hit-area')) {
+    if (fieldView.width < 1000) {
+      const matrix = field.getScreenCTM().inverse();
+      fieldNavigation = { mode: 'pan', view: { ...fieldView }, matrix, anchor: new DOMPoint(event.clientX, event.clientY).matrixTransform(matrix) };
+    }
+    return;
+  }
   hideCall();
   const mode = handle?.id ?? 'bend-handle';
   gesture = { id: event.pointerId, mode, start: fieldPoint(event, mode), release: { ...release }, target: { ...target }, bend: { ...bend } };
-  field.setPointerCapture(event.pointerId);
 });
 function moveHandle(mode, point) {
   if (mode === 'target-handle') {
@@ -532,24 +607,38 @@ function moveHandle(mode, point) {
   updatePath();
 }
 field.addEventListener('pointermove', (event) => {
+  if (!fieldPointers.has(event.pointerId)) return;
+  fieldPointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+  if (fieldNavigation) {
+    const { mode, view, matrix, anchor, distance } = fieldNavigation;
+    const [a, b] = [...fieldPointers.values()];
+    const midpoint = mode === 'pinch' ? { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 } : a;
+    const point = new DOMPoint(midpoint.x, midpoint.y).matrixTransform(matrix);
+    const width = mode === 'pinch' ? Math.max(250, Math.min(1000, view.width * distance / Math.max(1, Math.hypot(a.x - b.x, a.y - b.y)))) : view.width;
+    const ratio = width / view.width;
+    setFieldView({ x: anchor.x - (point.x - view.x) * ratio, y: anchor.y - (point.y - view.y) * ratio, width });
+    return;
+  }
   if (!gesture || gesture.id !== event.pointerId) return;
   const p = fieldPoint(event, gesture.mode);
   const original = gesture.mode === 'target-handle' ? gesture.target : gesture.mode === 'release-handle' ? gesture.release : gesture.bend;
   moveHandle(gesture.mode, { x: original.x + p.x - gesture.start.x, y: original.y + p.y - gesture.start.y });
 });
 function finishGesture(event) {
-  if (!gesture || gesture.id !== event.pointerId) return;
-  if (event.type === 'pointercancel') {
-    target = gesture.target;
-    release = gesture.release;
-    bend = gesture.bend;
+  if (!fieldPointers.has(event.pointerId)) return;
+  fieldPointers.delete(event.pointerId);
+  // Do not turn the remaining pinch finger into an aim or pan gesture.
+  fieldNavigation = null;
+  if (gesture?.id === event.pointerId) {
+    if (event.type !== 'pointerup') ({ target, release, bend } = gesture);
+    gesture = null;
+    updatePath();
   }
-  gesture = null;
   if (field.hasPointerCapture(event.pointerId)) field.releasePointerCapture(event.pointerId);
-  updatePath();
 }
 field.addEventListener('pointerup', finishGesture);
 field.addEventListener('pointercancel', finishGesture);
+field.addEventListener('lostpointercapture', finishGesture);
 document.querySelectorAll('.path-handle').forEach((handle) => handle.addEventListener('keydown', (event) => {
   if (busy || game.over || reviewing || !['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.key)) return;
   event.preventDefault();
@@ -638,6 +727,7 @@ $('#help-dialog .final-rule').insertAdjacentHTML('beforebegin', '<h3>Choose your
 $('#help-dialog ol').insertAdjacentHTML('afterend', '<h3>Height changes the matchup.</h3><p>Set pitcher height from 160 to 210 cm. Your feet stay on the mound, while your body, arm, and release height change together. This changes the flight angle, not the target or pitch speed. Height stays selected when you restart.</p><p>Every new batter, including the first batter, gets a random whole-centimeter height from 165 to 205 cm and an independently random batting side. Both sides are equally likely. There is no repeating lineup; consecutive batters can share either attribute. Both attributes stay fixed during the at-bat and its review. Restarting generates a fresh batter.</p><p>The arcade strike zone runs from the standing batter\'s shoulders to their knees, with a fixed plate width. The drawn zone and umpire use exactly the same boundaries. Your target does not move when a new batter arrives, so check your aim.</p>');
 $('#help-dialog ol').insertAdjacentHTML('afterend', '<h3>Lob it or let it rise.</h3><p>Fastballs range from 60 to 120 MPH, sliders from 60 to 99 MPH, and curveballs from 30 to 90 MPH. Curveballs below 65 MPH gain an eephus-style arc, largest at 30 MPH. Drag BEND up for an even higher loop that drops into the target.</p><p>Every pitch type supports upward ride. Drag BEND down to place the middle of the flight below the target, then watch the ball climb into the zone. This is arcade-style movement. Spin still bends sideways. The release and target stay fixed, and extreme bends stay within the field view.</p>');
 $('#help-dialog ol').insertAdjacentHTML('afterend', '<p>Dashed trails with numbered endpoints show completed pitches in the current at-bat. After a hit, walk, or out, review all pitches and select Next batter to continue. The batter and strike zone stay in place until you advance. After the third out, select View results when you finish reviewing.</p>');
+$('#help-dialog ol').insertAdjacentHTML('afterend', '<h3>Get a closer look.</h3><p>Pinch the field with two fingers to zoom from 100% to 400%. You can also use the + and - buttons at the bottom right. Drag empty ground to pan when zoomed in. Drag RELEASE, BEND, and TARGET as usual for finer adjustments. Reset restores the full field without changing your pitch. Zoom also works during pitch review.</p>');
 $('#help-dialog ol').insertAdjacentHTML('afterend', '<h3>Play the platoon matchup.</h3><p>Choose a right- or left-handed pitcher. Matching the batter\'s hand favors the pitcher with more misses and in-play outs. Opposite-handed batters make contact more often and turn more contact into hits. These are small arcade adjustments, not guaranteed outcomes or measured MLB splits. Taken ball and strike calls never change.</p><p>The lineup includes right- and left-handed batters. Their batting side stays fixed through each at-bat and its review. You can change pitching hands between pitches, an arcade option rather than an MLB rule. Your selection stays through restarts and scenario changes.</p><p>Changing hands mirrors the throwing arm, release reach, horizontal bend, and spin while keeping your target. Pitch presets also mirror their sideways movement. The spin slider still controls left or right break as labeled.</p>');
 $('#theme-button').addEventListener('click', () => {
   const dark = document.documentElement.dataset.theme ? document.documentElement.dataset.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
@@ -645,3 +735,4 @@ $('#theme-button').addEventListener('click', () => {
 });
 selectPreset('fastball');
 renderGame();
+$('.results-history').hidden = true;

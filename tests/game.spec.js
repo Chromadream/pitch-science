@@ -238,8 +238,78 @@ test('small phones keep all controls inside the viewport', async ({ page }) => {
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(320);
   const bounds = await page.locator('#throw-button').boundingBox();
   expect(bounds.x + bounds.width).toBeLessThanOrEqual(320);
+  expect(bounds.y + bounds.height).toBeLessThanOrEqual(740);
+  expect(await page.evaluate(() => document.documentElement.scrollHeight)).toBe(740);
   await expect(page.locator('#throw-button')).toBeEnabled();
 });
+
+for (const viewport of [{ width: 320, height: 568 }, { width: 360, height: 673 }, { width: 390, height: 844 }, { width: 768, height: 1024 }, { width: 740, height: 360 }, { width: 873, height: 360 }]) {
+  test(`complete mobile inning without scrolling at ${viewport.width}x${viewport.height}`, async ({ browser }) => {
+    const context = await browser.newContext({ viewport, isMobile: true, hasTouch: true, reducedMotion: 'reduce' });
+    const page = await context.newPage();
+    await page.addInitScript(() => { Math.random = () => 0.99; });
+    await page.goto('http://127.0.0.1:5173');
+    const fits = async (selectors) => {
+      expect(await page.evaluate(() => ({ x: scrollX, y: scrollY, width: document.documentElement.scrollWidth, height: document.documentElement.scrollHeight }))).toEqual({ x: 0, y: 0, ...viewport });
+      for (const selector of selectors) {
+        const box = await page.locator(selector).boundingBox();
+        expect(box, selector).not.toBeNull();
+        expect(box.x, selector).toBeGreaterThanOrEqual(0);
+        expect(box.y, selector).toBeGreaterThanOrEqual(0);
+        expect(box.x + box.width, selector).toBeLessThanOrEqual(viewport.width);
+        expect(box.y + box.height, selector).toBeLessThanOrEqual(viewport.height);
+      }
+    };
+    // Tap screen coordinates so Playwright cannot silently scroll controls into view.
+    const tap = async (selector) => {
+      await fits([selector]);
+      const box = await page.locator(selector).boundingBox();
+      await page.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2);
+    };
+    await fits(['#difficulty', '#pitcher-hand', '#pitcher-height', '#speed', '#spin', '#reset-path', '#throw-button', '.pitch-presets', '#field', '.field-zoom']);
+    await page.locator('#difficulty').selectOption('relief');
+    await page.locator('#pitcher-height').fill('210');
+    await page.locator('#pitcher-hand').selectOption('L');
+    await tap('[data-preset="curveball"]');
+    await page.locator('#speed').fill('30');
+    await page.locator('#spin').fill('-3000');
+    const client = await context.newCDPSession(page);
+    for (const id of ['release', 'bend', 'target']) {
+      const handle = page.locator(`#${id}-handle`);
+      const before = await handle.getAttribute('transform');
+      const start = await handle.evaluate((el) => {
+        const p = new DOMPoint(0, 0).matrixTransform(el.getScreenCTM());
+        return { x: p.x, y: p.y };
+      });
+      await client.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [start] });
+      await client.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: start.x - 5, y: start.y + 3 }] });
+      await client.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+      await expect(handle).not.toHaveAttribute('transform', before);
+      await fits(['#throw-button']);
+    }
+    await tap('#restart-button');
+    await expect(page.locator('#pitcher-height')).toHaveValue('210');
+    for (let batter = 0; batter < 3; batter++) {
+      for (let count = 0; count < 3; count++) {
+        await tap('#throw-button');
+        await expect(page.locator('#pitcher-height')).toBeDisabled();
+        await expect(page.locator('#ready-status')).not.toHaveText('IN FLIGHT');
+      }
+      await fits(['#next-batter', '#pitch-chart', '#field']);
+      await tap('#next-batter');
+    }
+    await expect(page.locator('#end-title')).toHaveText('Perfect Win.');
+    await fits(['#end-screen', '#play-again', '#history-button']);
+    await tap('#history-button');
+    await expect(page.locator('#history-dialog')).toBeVisible();
+    await expect(page.locator('#results-table .result-pitch')).toHaveCount(9);
+    await page.getByRole('button', { name: 'Back to game' }).click();
+    await tap('#play-again');
+    await fits(['#throw-button', '#speed', '#spin']);
+    await expect(page.locator('#pitcher-height')).toBeEnabled();
+    await context.close();
+  });
+}
 
 test('CGSO finishes the top of the ninth with a 1-0 lead without a Save badge', async ({ page }) => {
   await page.goto('/');
